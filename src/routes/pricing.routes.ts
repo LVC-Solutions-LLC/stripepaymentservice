@@ -8,4 +8,4 @@ router.get('/one-time', validate(getPricingSchema), getOneTimePricing);
 router.get('/subscription/plan', validate(getPricingSchema), getSubscriptionPricing);
 router.get('/all', getAllPricingMetadata);
 
-export default router;
+export default router; 
