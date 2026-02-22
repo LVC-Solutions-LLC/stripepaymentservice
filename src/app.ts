@@ -29,9 +29,24 @@ app.use('/api/v1/subscriptions', subscriptionRoutes);
 app.use('/api/v1/pricing', pricingRoutes);
 app.use('/api/v1/identity', identityRoutes);
 
+// Root Endpoint
+app.get('/', (req, res) => {
+    res.status(200).json({
+        message: 'Payment Service API',
+        version: '1.0.0',
+        status: 'running',
+        docs: '/api/v1/identity/create-session' // Example
+    });
+});
+
 // Health Check
 app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+    res.status(200).json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        env: env.NODE_ENV
+    });
 });
 
 // 404 Handler
