@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { PaymentService } from '../services/payment.service';
 import { z } from 'zod';
 
+// intializing payment service
 const paymentService = new PaymentService();
 
 export const createVerificationIntentSchema = z.object({
