@@ -8,7 +8,7 @@ export const createIdentitySessionSchema = z.object({
     body: z.object({
         userId: z.string().min(1),
         email: z.string().email(),
-        role: z.enum(['job_seeker', 'student_job_seeker', 'recruiter']),
+        role: z.enum(['job_seeker', 'student_job_seeker', 'recruiter', 'jobseeker', 'studentjobseeker']),
         stripeMode: z.enum(['test', 'live']).optional(),
     }),
 });

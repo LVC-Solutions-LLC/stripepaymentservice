@@ -27,15 +27,24 @@ app.use(express.json());
 app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/subscriptions', subscriptionRoutes);
 app.use('/api/v1/pricing', pricingRoutes);
+// Routes
+app.use('/api/v1/payments', paymentRoutes);
+app.use('/api/v1/subscriptions', subscriptionRoutes);
+app.use('/api/v1/pricing', pricingRoutes);
 app.use('/api/v1/identity', identityRoutes);
 
 // Root Endpoint
-app.get('/', (req, res) => {
+app.get('/', (req: Request, res: Response) => {
     res.status(200).json({
+        status: 'success',
         message: 'Payment Service API',
-        version: '1.0.0',
-        status: 'running',
-        docs: '/api/v1/identity/create-session' // Example
+        version: '1.1.0',
+        environment: env.NODE_ENV,
+        endpoints: {
+            identity: '/api/v1/identity',
+            payments: '/api/v1/payments',
+            pricing: '/api/v1/pricing'
+        }
     });
 });
 
