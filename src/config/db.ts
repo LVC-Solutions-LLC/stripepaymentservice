@@ -2,7 +2,7 @@ import admin from 'firebase-admin';
 import { env } from './env';
 
 // Initialize Firebase Admin
-// dev service testing comit
+// dev service testing comitb7
 // We construct the credential object manually to handle the private key newlines correctly
 if (!admin.apps.length) {
     admin.initializeApp({
