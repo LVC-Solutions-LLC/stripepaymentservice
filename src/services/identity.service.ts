@@ -12,6 +12,7 @@ export class IdentityService {
         userId: string,
         email: string,
         role: string,
+        returnUrl?: string,
         stripeMode?: 'test' | 'live'
     ) {
         const stripe = getStripe(stripeMode);
@@ -44,7 +45,7 @@ export class IdentityService {
                 email,
                 role,
             },
-            return_url: `${env.FRONTEND_URL}/verification-status?session_id={VERIFICATION_SESSION_ID}`, // Corrected placeholder
+            return_url: returnUrl || `${env.FRONTEND_URL}/verification-status`,
         });
 
         console.log(`✅ Identity Session created for user ${userId}: ${session.id}`);

@@ -9,14 +9,15 @@ export const createIdentitySessionSchema = z.object({
         userId: z.string().min(1),
         email: z.string().email(),
         role: z.enum(['job_seeker', 'student_job_seeker', 'recruiter', 'jobseeker', 'studentjobseeker']),
+        returnUrl: z.string().url(),
         stripeMode: z.enum(['test', 'live']).optional(),
     }),
 });
 
 export const createIdentitySession = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const { userId, email, role, stripeMode } = req.body;
-        const result = await identityService.createVerificationSession(userId, email, role, stripeMode);
+        const { userId, email, role, returnUrl, stripeMode } = req.body;
+        const result = await identityService.createVerificationSession(userId, email, role, returnUrl, stripeMode);
 
         res.status(200).json(result);
     } catch (err) {
