@@ -34,7 +34,10 @@ export const createVerificationCheckoutSession = async (req: Request, res: Respo
             userId, email, role, country, successUrl, cancelUrl, stripeMode
         );
 
-        res.status(200).json(result);
+        res.status(200).json({
+            status: 'success',
+            data: result
+        });
     } catch (err) {
         next(err);
     }
