@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 import { z } from 'zod';
-
+// env update
 dotenv.config();
 
 const envSchema = z.object({
