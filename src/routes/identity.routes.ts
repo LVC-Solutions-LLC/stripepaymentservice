@@ -2,7 +2,8 @@ import { Router } from 'express';
 import {
     createIdentitySession,
     createIdentitySessionSchema,
-    getIdentitySession
+    getIdentitySession,
+    getLatestIdentitySession
 } from '../controllers/identity.controller';
 import { validate } from '../middlewares/validate';
 
@@ -14,6 +15,7 @@ router.post(
     createIdentitySession
 );
 
+router.get('/latest', getLatestIdentitySession);
 router.get('/session/:sessionId', getIdentitySession);
 
 export default router;

@@ -48,6 +48,7 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
                     await db.collection('users').doc(paymentIntent.metadata.userId).update({
                         verified: true,
                         verificationStatus: 'verified',
+                        oneTimeFeeStatus: 'paid',
                         updatedAt: FieldValue.serverTimestamp(),
                     });
                 } else {
@@ -90,6 +91,7 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
                     await db.collection('users').doc(session.metadata.userId).update({
                         verified: true,
                         verificationStatus: 'verified',
+                        oneTimeFeeStatus: 'paid',
                         updatedAt: FieldValue.serverTimestamp(),
                     });
 
@@ -115,6 +117,7 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
                     await db.collection('users').doc(identitySessionVerified.metadata.userId).update({
                         identityVerified: true,
                         identityVerificationStatus: 'verified',
+                        identityDocumentStatus: 'verified',
                         updatedAt: FieldValue.serverTimestamp(),
                     });
 
@@ -132,6 +135,7 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
                 if (identitySessionRequiresInput.metadata?.userId) {
                     await db.collection('users').doc(identitySessionRequiresInput.metadata.userId).update({
                         identityVerificationStatus: 'requires_input',
+                        identityDocumentStatus: 'requires_input',
                         updatedAt: FieldValue.serverTimestamp(),
                     });
 
@@ -149,6 +153,7 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
                 if (identitySessionProcessing.metadata?.userId) {
                     await db.collection('users').doc(identitySessionProcessing.metadata.userId).update({
                         identityVerificationStatus: 'processing',
+                        identityDocumentStatus: 'processing',
                         updatedAt: FieldValue.serverTimestamp(),
                     });
 
@@ -167,6 +172,7 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
                 if (identitySessionFailed.metadata?.userId) {
                     await db.collection('users').doc(identitySessionFailed.metadata.userId).update({
                         identityVerificationStatus: 'failed',
+                        identityDocumentStatus: 'failed',
                         updatedAt: FieldValue.serverTimestamp(),
                     });
 

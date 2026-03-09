@@ -194,6 +194,7 @@ export class PaymentService {
             await db.collection('users').doc(userId).update({
                 verified: true,
                 verificationStatus: 'verified',
+                oneTimeFeeStatus: 'paid',
                 updatedAt: FieldValue.serverTimestamp(),
             });
 
