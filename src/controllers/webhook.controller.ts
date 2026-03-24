@@ -85,8 +85,38 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
                 const session = event.data.object as any;
                 logger.info(`CheckoutSession completed: ${session.id}`);
 
-                // If this was a verification payment, update the user record in Firestore
-                if (session.metadata?.userId && session.metadata?.type === 'ONE_TIME_VERIFICATION') {
+                if (session.metadata?.userId && session.metadata?.type === 'LAYOFF_PAYMENT') {
+                    logger.info(`✅ Mark user ${session.metadata.userId} LAYOFF_PAYMENT as completed via CheckoutSession`);
+                    const registrationId = session.metadata.registrationId;
+                    const planId = session.metadata.planId;
+                    const amountTotal = session.amount_total ? session.amount_total / 100 : 0;
+                    const currency = session.currency?.toUpperCase() || 'USD';
+
+                    if (registrationId) {
+                        await db.collection('layoffRegistrations').doc(registrationId).update({
+                            layoffPaymentStatus: 'completed',
+                            status: 'under_review',
+                            subscriptionPlan: {
+                                planId: planId || 'layoff_unknown',
+                                planName: planId ? planId.replace('layoff_', '').toUpperCase() : 'Layoff Plan',
+                                price: `${amountTotal} ${currency}`
+                            },
+                            updatedAt: FieldValue.serverTimestamp(),
+                        });
+                    }
+
+                    await db.collection('payments').doc(session.id).set({
+                        userId: session.metadata.userId,
+                        amount: session.amount_total,
+                        currency: session.currency,
+                        status: 'succeeded',
+                        type: 'LAYOFF_PAYMENT',
+                        registrationId: registrationId || null,
+                        planId: planId || null,
+                        updatedAt: FieldValue.serverTimestamp(),
+                    }, { merge: true });
+
+                } else if (session.metadata?.userId && session.metadata?.type === 'ONE_TIME_VERIFICATION') {
                     logger.info(`✅ Mark user ${session.metadata.userId} as VERIFIED via CheckoutSession`);
                     await db.collection('users').doc(session.metadata.userId).update({
                         verified: true,

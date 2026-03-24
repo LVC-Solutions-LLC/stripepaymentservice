@@ -109,14 +109,24 @@ export class PaymentService {
         country: string,
         successUrl: string,
         cancelUrl: string,
-        stripeMode?: 'test' | 'live'
+        stripeMode?: 'test' | 'live',
+        planId?: string,
+        amount?: number,
+        currency?: string,
+        label?: string,
+        registrationId?: string
     ) {
         const stripe = getStripe(stripeMode);
-        // 1. Calculate amount
-        const amount = getOneTimeFee(role, country);
-        const currency = country === 'IN' ? 'inr' : 'usd';
+        
+        // 1. Calculate amount & currency
+        // If custom amount/currency provided (e.g. from Layoff Flow), use them.
+        // Otherwise fall back to default role-based KYC fee.
+        const finalizedCurrency = (currency || (country === 'IN' ? 'inr' : 'usd')).toLowerCase();
+        const finalizedAmount = amount ? Math.round(amount * 100) : getOneTimeFee(role, country);
+        const finalizedLabel = label || `${role.replace(/_/g, ' ').toUpperCase()} Identity Verification`;
+        const finalizedDescription = label ? `Payment for ${label}` : `One-time KYC verification fee for ${country}`;
 
-        // 2. Find or Create User (reuse logic or extract it)
+        // 2. Find or Create User
         const userRef = db.collection('users').doc(userId);
         const userDoc = await userRef.get();
         let stripeCustomerId: string | undefined;
@@ -129,7 +139,6 @@ export class PaymentService {
             const userData = userDoc.data();
             stripeCustomerId = userData?.stripeCustomerId;
 
-            // Check if customer exists in current environment
             if (stripeCustomerId) {
                 try {
                     await stripe.customers.retrieve(stripeCustomerId);
@@ -149,18 +158,20 @@ export class PaymentService {
             }
         }
 
+        const isLayoff = planId?.startsWith('layoff_');
+
         // 3. Create Checkout Session
         const session = await stripe.checkout.sessions.create({
             customer: stripeCustomerId,
             line_items: [
                 {
                     price_data: {
-                        currency,
+                        currency: finalizedCurrency,
                         product_data: {
-                            name: `${role.replace(/_/g, ' ').toUpperCase()} Identity Verification`,
-                            description: `One-time KYC verification fee for ${country}`,
+                            name: finalizedLabel,
+                            description: finalizedDescription,
                         },
-                        unit_amount: amount,
+                        unit_amount: finalizedAmount,
                     },
                     quantity: 1,
                 },
@@ -171,12 +182,16 @@ export class PaymentService {
             payment_intent_data: {
                 metadata: {
                     userId,
-                    type: 'ONE_TIME_VERIFICATION',
+                    type: isLayoff ? 'LAYOFF_PAYMENT' : 'ONE_TIME_VERIFICATION',
+                    registrationId: registrationId || '',
+                    planId: planId || '',
                 },
             },
             metadata: {
                 userId,
-                type: 'ONE_TIME_VERIFICATION',
+                type: isLayoff ? 'LAYOFF_PAYMENT' : 'ONE_TIME_VERIFICATION',
+                registrationId: registrationId || '',
+                planId: planId || '',
             },
         });
 
@@ -191,6 +206,35 @@ export class PaymentService {
         const session = await stripe.checkout.sessions.retrieve(sessionId);
 
         if (session.payment_status === 'paid') {
+            const metadata = session.metadata || {};
+            const type = metadata.type;
+
+            if (type === 'LAYOFF_PAYMENT') {
+                const registrationId = metadata.registrationId;
+                const planId = metadata.planId;
+                const amountTotal = session.amount_total ? session.amount_total / 100 : 0;
+                const currency = session.currency?.toUpperCase() || 'USD';
+
+                if (registrationId) {
+                    await db.collection('layoffRegistrations').doc(registrationId).update({
+                        layoffPaymentStatus: 'completed',
+                        status: 'under_review',
+                        subscriptionPlan: {
+                            planId: planId || 'layoff_unknown',
+                            planName: planId ? planId.replace('layoff_', '').toUpperCase() : 'Layoff Plan',
+                            price: `${amountTotal} ${currency}`
+                        },
+                        updatedAt: FieldValue.serverTimestamp(),
+                    });
+                }
+                
+                return {
+                    status: 'success',
+                    message: 'Layoff payment verified',
+                    verified: true
+                };
+            }
+
             await db.collection('users').doc(userId).update({
                 verified: true,
                 verificationStatus: 'verified',
