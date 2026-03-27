@@ -6,11 +6,45 @@ import { FieldValue } from 'firebase-admin/firestore';
 
 export class SubscriptionService {
 
-    async createSubscription(userId: string, email: string, role: string, country: string, stripeMode?: 'test' | 'live') {
+    private async getOrCreateSubscriptionProduct(role: string, stripeMode?: 'test' | 'live') {
         const stripe = getStripe(stripeMode);
-        const priceId = getSubscriptionPlanId(role, country);
+        const productName = `LVC Fair Job: ${role.replace(/_/g, ' ').toUpperCase()} Subscription`;
+        
+        // Try to find existing product by name
+        const products = await stripe.products.list({ limit: 10, active: true });
+        const existing = products.data.find(p => p.name === productName);
+        
+        if (existing) return existing.id;
+        
+        // Create new if not found
+        const product = await stripe.products.create({
+            name: productName,
+            description: `Monthly subscription plan for ${role.replace(/_/g, ' ')} roles`,
+            metadata: { type: 'SUBSCRIPTION', role: role }
+        });
+        
+        return product.id;
+    }
 
-        // 1. Find or Create User
+    async createSubscription(userId: string, email: string, role: string, country: string, planId: string = 'standard', stripeMode?: 'test' | 'live') {
+        const stripe = getStripe(stripeMode);
+        
+        // 1. Resolve Product and Pricing
+        const productId = await this.getOrCreateSubscriptionProduct(role, stripeMode);
+        const pricingDoc = await db.collection('configurations').doc('pricing').get();
+        if (!pricingDoc.exists) throw new AppError('Pricing configuration not found', 500);
+        
+        const subscriptions = pricingDoc.data()?.subscriptions;
+        const pricingData = subscriptions?.[role]?.[planId];
+        if (!pricingData) throw new AppError(`No subscription plan found for role: ${role}, plan: ${planId}`, 404);
+
+        const countryKey = country === 'IN' ? 'india' : 'global';
+        const amount = pricingData[countryKey];
+        const currency = country === 'IN' ? 'inr' : 'usd';
+        
+        if (!amount) throw new AppError(`No price defined for country: ${country}`, 404);
+
+        // 2. Find or Create User
         const userRef = db.collection('users').doc(userId);
         const userDoc = await userRef.get();
 
@@ -45,35 +79,30 @@ export class SubscriptionService {
             throw new AppError('User already has an active subscription', 400);
         }
 
-        // 3. Create Stripe Subscription
-        const subscription = await stripe.subscriptions.create({
+        // 3. Create Stripe Checkout Session for Subscription
+        const session = await stripe.checkout.sessions.create({
             customer: stripeCustomerId!,
-            items: [{ price: priceId }],
-            payment_behavior: 'default_incomplete',
-            payment_settings: { save_default_payment_method: 'on_subscription' },
-            expand: ['latest_invoice.payment_intent'],
-            metadata: { userId: userId, role: role },
+            line_items: [{ 
+                price_data: {
+                    currency: currency,
+                    product: productId,
+                    unit_amount: amount * 100,
+                    recurring: { interval: 'month' },
+                },
+                quantity: 1,
+            }],
+            mode: 'subscription',
+            success_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard?payment=success&type=subscription&session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard?payment=cancel`,
+            metadata: { userId, role, planId },
+            subscription_data: {
+                metadata: { userId, role, planId }
+            }
         });
-
-        // 4. Save preliminary subscription record
-        const subscriptionData = subscription as any;
-
-        // Using Stripe Subscription ID as doc ID
-        await db.collection('subscriptions').doc(subscription.id).set({
-            userId,
-            status: subscription.status,
-            planId: priceId,
-            currentPeriodEnd: new Date(subscriptionData.current_period_end * 1000),
-            createdAt: FieldValue.serverTimestamp(),
-            updatedAt: FieldValue.serverTimestamp(),
-        });
-
-        const invoice = subscription.latest_invoice as any;
-        const paymentIntent = invoice.payment_intent as any;
 
         return {
-            subscriptionId: subscription.id,
-            clientSecret: paymentIntent.client_secret,
+            url: session.url,
+            sessionId: session.id,
         };
     }
 
@@ -110,7 +139,21 @@ export class SubscriptionService {
             throw new AppError('Subscription not found', 404);
         }
 
-        const newPriceId = getSubscriptionPlanId(newRole, newCountry);
+        // Fetch new price from Firestore
+        const pricingDoc = await db.collection('configurations').doc('pricing').get();
+        if (!pricingDoc.exists) throw new AppError('Pricing configuration not found', 500);
+        
+        const subscriptions = pricingDoc.data()?.subscriptions;
+        const pricingData = subscriptions?.[newRole]?.['standard']; // Defaulting to standard for change
+        if (!pricingData) throw new AppError(`No subscription plan found for role: ${newRole}`, 404);
+
+        const countryKey = newCountry === 'IN' ? 'india' : 'global';
+        const amount = pricingData[countryKey];
+        const currency = newCountry === 'IN' ? 'inr' : 'usd';
+
+        if (!amount) throw new AppError(`No price defined for country: ${newCountry}`, 404);
+
+        const productId = await this.getOrCreateSubscriptionProduct(newRole, stripeMode);
 
         const stripeSub = await stripe.subscriptions.retrieve(subscriptionId);
         const itemId = stripeSub.items.data[0].id;
@@ -118,7 +161,12 @@ export class SubscriptionService {
         const updatedSub = await stripe.subscriptions.update(subscriptionId, {
             items: [{
                 id: itemId,
-                price: newPriceId,
+                price_data: {
+                    currency: currency,
+                    product: productId,
+                    unit_amount: amount * 100,
+                    recurring: { interval: 'month' },
+                } as any,
             }],
             proration_behavior: 'always_invoice',
         });

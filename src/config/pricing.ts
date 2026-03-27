@@ -28,18 +28,51 @@ export const ONE_TIME_FEES: Record<string, Record<string, number>> = {
     }
 };
 
-// Map Role + Country to Stripe Price ID for Subscriptions
-// In a real app this might be in the database or fetched from Stripe
-export const SUBSCRIPTION_PLANS: Record<string, Record<string, string>> = {
+// Map Role + Tier + Country to Stripe Price ID for Subscriptions
+export const SUBSCRIPTION_PLANS: Record<string, Record<string, Record<string, string>>> = {
     'job_seeker': {
-        'US': 'price_jobseeker_us_monthly',
-        'IN': 'price_jobseeker_in_monthly',
-        'DEFAULT': 'price_jobseeker_default',
+        'basic': {
+            'US': 'price_jobseeker_basic_us_monthly',
+            'IN': 'price_jobseeker_basic_in_monthly',
+            'DEFAULT': 'price_jobseeker_basic_default',
+        },
+        'standard': {
+            'US': 'price_jobseeker_standard_us_monthly',
+            'IN': 'price_jobseeker_standard_in_monthly',
+            'DEFAULT': 'price_jobseeker_standard_default',
+        },
+        'premium': {
+            'US': 'price_jobseeker_premium_us_monthly',
+            'IN': 'price_jobseeker_premium_in_monthly',
+            'DEFAULT': 'price_jobseeker_premium_default',
+        },
     },
     'company': {
-        'US': 'price_company_us_monthly',
-        'IN': 'price_company_in_monthly',
-        'DEFAULT': 'price_company_default',
+        '1_seat': {
+            'US': 'price_company_1_seat_us_monthly',
+            'IN': 'price_company_1_seat_in_monthly',
+            'DEFAULT': 'price_company_1_seat_default',
+        },
+        '2_seats': {
+            'US': 'price_company_2_seats_us_monthly',
+            'IN': 'price_company_2_seats_in_monthly',
+            'DEFAULT': 'price_company_2_seats_default',
+        },
+        '5_seats': {
+            'US': 'price_company_5_seats_us_monthly',
+            'IN': 'price_company_5_seats_in_monthly',
+            'DEFAULT': 'price_company_5_seats_default',
+        },
+        '10_seats': {
+            'US': 'price_company_10_seats_us_monthly',
+            'IN': 'price_company_10_seats_in_monthly',
+            'DEFAULT': 'price_company_10_seats_default',
+        },
+        '25_seats': {
+            'US': 'price_company_25_seats_us_monthly',
+            'IN': 'price_company_25_seats_in_monthly',
+            'DEFAULT': 'price_company_25_seats_default',
+        },
     },
 };
 
@@ -49,8 +82,10 @@ export const getOneTimeFee = (role: string, country: string): number => {
     return roleFees[countryKey] || roleFees['US'];
 };
 
-export const getSubscriptionPlanId = (role: string, country: string): string => {
+export const getSubscriptionPlanId = (role: string, country: string, planId: string = 'standard'): string => {
     const rolePlans = SUBSCRIPTION_PLANS[role];
     if (!rolePlans) throw new Error(`No subscription plans for role: ${role}`);
-    return rolePlans[country] || rolePlans['DEFAULT'];
+    
+    const tierPlans = rolePlans[planId] || rolePlans['standard'] || Object.values(rolePlans)[0];
+    return tierPlans[country] || tierPlans['DEFAULT'];
 };

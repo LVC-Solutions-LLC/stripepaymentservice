@@ -69,16 +69,45 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
             case 'customer.subscription.updated':
             case 'customer.subscription.deleted':
                 const subscription = event.data.object as any;
-                logger.info(`Subscription updated: ${subscription.id} status: ${subscription.status}`);
+                const subUserId = subscription.metadata.userId;
+                const subPlanId = subscription.metadata.planId || subscription.items.data[0].price.id;
+                const subRole = subscription.metadata.role || 'job_seeker';
+                
+                logger.info(`Subscription ${subscription.id} for user ${subUserId} reached status: ${subscription.status}`);
 
-                await db.collection('subscriptions').doc(subscription.id).set({
-                    userId: subscription.metadata.userId,
-                    status: subscription.status,
-                    planId: subscription.items.data[0].price.id,
-                    currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-                    updatedAt: FieldValue.serverTimestamp(),
-                    // Only set createdAt if it doesn't exist? merge: true handles updates
-                }, { merge: true });
+                if (subUserId) {
+                    const subData = {
+                        userId: subUserId,
+                        status: subscription.status,
+                        planId: subPlanId, // Use metadata planId if available
+                        role: subRole,
+                        currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+                        updatedAt: FieldValue.serverTimestamp(),
+                    };
+
+                    await db.collection('subscriptions').doc(subscription.id).set(subData, { merge: true });
+
+                    // Also update the main user record for legacy compatibility
+                    const userUpdate: any = {};
+                    if (subRole === 'job_seeker') {
+                        userUpdate.jobSeekerSubscription = {
+                            subscriptionId: subscription.id,
+                            jobSeekerPremiumStatus: subscription.status === 'active' || subscription.status === 'trialing' ? subPlanId : 'free',
+                            lastUpdated: FieldValue.serverTimestamp(),
+                        };
+                    } else if (subRole === 'company') {
+                        userUpdate.recruiterSubscription = {
+                            subscriptionId: subscription.id,
+                            status: subscription.status,
+                            planId: subPlanId,
+                            lastUpdated: FieldValue.serverTimestamp(),
+                        };
+                    }
+
+                    await db.collection('users').doc(subUserId).update(userUpdate).catch(err => {
+                        logger.error(`Failed to update user record for subscription: ${err.message}`);
+                    });
+                }
                 break;
 
             case 'checkout.session.completed':

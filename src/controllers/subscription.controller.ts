@@ -10,15 +10,16 @@ export const createSubscriptionSchema = z.object({
         email: z.string().email(),
         role: z.enum(['job_seeker', 'company']),
         country: z.string().length(2),
+        planId: z.string().optional(),
         stripeMode: z.enum(['test', 'live']).optional(),
     }),
 });
 
 export const createSubscription = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const { userId, email, role, country, stripeMode } = req.body;
-        const result = await subscriptionService.createSubscription(userId, email, role, country, stripeMode);
-        res.status(201).json(result);
+        const { userId, email, role, country, planId, stripeMode } = req.body;
+        const result = await subscriptionService.createSubscription(userId, email, role, country, planId, stripeMode);
+        res.status(201).json({ status: "success", data: result });
     } catch (err) {
         next(err);
     }
