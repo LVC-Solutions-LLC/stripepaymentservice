@@ -116,10 +116,10 @@ export class IdentityService {
     async getLatestVerificationSession(userId: string, stripeMode: 'test' | 'live' = 'test'): Promise<any> {
         console.log(`[LATEST] Fetching last verification for user: ${userId}`);
 
+        // WORKAROUND: Remove .orderBy() to avoid requiring a composite index in new environments (QA/Dev)
+        // Since a user has very few verification sessions (usually 1-3), in-memory sort is perfectly fine.
         const snapshot = await db.collection('verifications')
             .where('userId', '==', userId)
-            .orderBy('createdAt', 'desc')
-            .limit(1)
             .get();
 
         if (snapshot.empty) {
@@ -127,9 +127,21 @@ export class IdentityService {
             return null;
         }
 
-        const latestDoc = snapshot.docs[0];
+        // Sort in memory by createdAt descending
+        const docs = snapshot.docs.map(d => ({ 
+            id: d.id, 
+            ...d.data() 
+        })) as any[];
+
+        docs.sort((a, b) => {
+            const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt?._seconds || 0) * 1000;
+            const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt?._seconds || 0) * 1000;
+            return timeB - timeA;
+        });
+
+        const latestDoc = docs[0];
         const sessionId = latestDoc.id;
-        console.log(`[LATEST] Found session ID: ${sessionId}. Fetching from Stripe...`);
+        console.log(`[LATEST] Found session ID: ${sessionId} via in-memory sort. Fetching from Stripe...`);
 
         return this.getVerificationSession(sessionId, stripeMode, userId);
     }

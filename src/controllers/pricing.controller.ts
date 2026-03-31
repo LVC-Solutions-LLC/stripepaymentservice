@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { getOneTimeFee, getSubscriptionPlanId, ONE_TIME_FEES, SUBSCRIPTION_PLANS } from '../config/pricing';
 import { z } from 'zod';
+import { db } from '../config/db';
 
 export const getPricingSchema = z.object({
     query: z.object({
@@ -54,11 +55,20 @@ export const getSubscriptionPricing = async (req: Request, res: Response, next: 
 
 export const getAllPricingMetadata = async (req: Request, res: Response, next: NextFunction) => {
     try {
+        const pricingDoc = await db.collection('configurations').doc('pricing').get();
+        
+        if (pricingDoc.exists) {
+            return res.status(200).json({
+                status: 'success',
+                data: pricingDoc.data()
+            });
+        }
+
         res.status(200).json({
             status: 'success',
             data: {
-                oneTimeFees: ONE_TIME_FEES,
-                subscriptionPlans: SUBSCRIPTION_PLANS
+                oneTime: ONE_TIME_FEES,
+                subscriptions: SUBSCRIPTION_PLANS
             }
         });
     } catch (err) {

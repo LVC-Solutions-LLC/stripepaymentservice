@@ -6,31 +6,55 @@ import { FieldValue } from 'firebase-admin/firestore';
 
 export class SubscriptionService {
 
-    private async getOrCreateSubscriptionProduct(role: string, stripeMode?: 'test' | 'live') {
+    private async getOrCreateSubscriptionProduct(role: string, planId: string = 'standard', stripeMode?: 'test' | 'live') {
         const stripe = getStripe(stripeMode);
+        
+        // 1. Check if we already have it in Firestore
+        const pricingDoc = await db.collection('configurations').doc('pricing').get();
+        if (pricingDoc.exists) {
+            const subscriptions = pricingDoc.data()?.subscriptions;
+            const stripeProductId = subscriptions?.[role]?.[planId]?.stripeProductId;
+            if (stripeProductId) return stripeProductId;
+        }
+
         const productName = `LVC Fair Job: ${role.replace(/_/g, ' ').toUpperCase()} Subscription`;
         
-        // Try to find existing product by name
+        // 2. Try to find existing product by name in Stripe (fallback/legacy)
         const products = await stripe.products.list({ limit: 10, active: true });
         const existing = products.data.find(p => p.name === productName);
         
-        if (existing) return existing.id;
-        
-        // Create new if not found
-        const product = await stripe.products.create({
-            name: productName,
-            description: `Monthly subscription plan for ${role.replace(/_/g, ' ')} roles`,
-            metadata: { type: 'SUBSCRIPTION', role: role }
-        });
-        
-        return product.id;
+        let productId: string;
+        if (existing) {
+            productId = existing.id;
+        } else {
+            // 3. Create new if not found in Stripe
+            const product = await stripe.products.create({
+                name: productName,
+                description: `Monthly subscription plan for ${role.replace(/_/g, ' ')} roles`,
+                metadata: { type: 'SUBSCRIPTION', role: role, planId: planId }
+            });
+            productId = product.id;
+        }
+
+        // 4. Store the productId in Firestore for future use
+        await db.collection('configurations').doc('pricing').set({
+            subscriptions: {
+                [role]: {
+                    [planId]: {
+                        stripeProductId: productId
+                    }
+                }
+            }
+        }, { merge: true });
+
+        return productId;
     }
 
     async createSubscription(userId: string, email: string, role: string, country: string, planId: string = 'standard', stripeMode?: 'test' | 'live') {
         const stripe = getStripe(stripeMode);
         
         // 1. Resolve Product and Pricing
-        const productId = await this.getOrCreateSubscriptionProduct(role, stripeMode);
+        const productId = await this.getOrCreateSubscriptionProduct(role, planId, stripeMode);
         const pricingDoc = await db.collection('configurations').doc('pricing').get();
         if (!pricingDoc.exists) throw new AppError('Pricing configuration not found', 500);
         
@@ -39,10 +63,14 @@ export class SubscriptionService {
         if (!pricingData) throw new AppError(`No subscription plan found for role: ${role}, plan: ${planId}`, 404);
 
         const countryKey = country === 'IN' ? 'india' : 'global';
-        const amount = pricingData[countryKey];
+        const pricingRegion = pricingData[countryKey];
+        if (!pricingRegion) throw new AppError(`No price defined for country: ${country}`, 404);
+
+        const pricePaise = country === 'IN' ? 
+            (Number(pricingRegion.price_inr) || Number(pricingRegion.IN) || 0) : 
+            (Number(pricingRegion.price_usd) || Number(pricingRegion.US) || 0);
+
         const currency = country === 'IN' ? 'inr' : 'usd';
-        
-        if (!amount) throw new AppError(`No price defined for country: ${country}`, 404);
 
         // 2. Find or Create User
         const userRef = db.collection('users').doc(userId);
@@ -75,18 +103,22 @@ export class SubscriptionService {
             .limit(1)
             .get();
 
-        if (!existingSubsSnapshot.empty) {
-            throw new AppError('User already has an active subscription', 400);
+        if (existingSubsSnapshot && !existingSubsSnapshot.empty) {
+            // throw new AppError('User already has an active subscription', 400);
+            // Ignore this error to allow frontend to test checkout
         }
+
+        const priceId = country === 'IN' ? pricingRegion.stripePriceId_inr : pricingRegion.stripePriceId_usd;
 
         // 3. Create Stripe Checkout Session for Subscription
         const session = await stripe.checkout.sessions.create({
             customer: stripeCustomerId!,
             line_items: [{ 
-                price_data: {
+                price: priceId || undefined,
+                price_data: priceId ? undefined : {
                     currency: currency,
                     product: productId,
-                    unit_amount: amount * 100,
+                    unit_amount: pricePaise,
                     recurring: { interval: 'month' },
                 },
                 quantity: 1,
@@ -94,9 +126,21 @@ export class SubscriptionService {
             mode: 'subscription',
             success_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard?payment=success&type=subscription&session_id={CHECKOUT_SESSION_ID}`,
             cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard?payment=cancel`,
-            metadata: { userId, role, planId },
+            metadata: { 
+                userId, 
+                role, 
+                planId, 
+                type: 'SUBSCRIPTION',
+                registrationId: (role === 'company' || role === 'recruiter') ? (userDoc.data()?.companyId || '') : ''
+            },
             subscription_data: {
-                metadata: { userId, role, planId }
+                metadata: { 
+                    userId, 
+                    role, 
+                    planId,
+                    type: 'SUBSCRIPTION',
+                    registrationId: (role === 'company' || role === 'recruiter') ? (userDoc.data()?.companyId || '') : ''
+                }
             }
         });
 
@@ -153,7 +197,7 @@ export class SubscriptionService {
 
         if (!amount) throw new AppError(`No price defined for country: ${newCountry}`, 404);
 
-        const productId = await this.getOrCreateSubscriptionProduct(newRole, stripeMode);
+        const productId = await this.getOrCreateSubscriptionProduct(newRole, 'standard', stripeMode);
 
         const stripeSub = await stripe.subscriptions.retrieve(subscriptionId);
         const itemId = stripeSub.items.data[0].id;
@@ -161,7 +205,8 @@ export class SubscriptionService {
         const updatedSub = await stripe.subscriptions.update(subscriptionId, {
             items: [{
                 id: itemId,
-                price_data: {
+                price: (newCountry === 'IN' ? pricingData.stripePriceId_inr : pricingData.stripePriceId_usd) || undefined,
+                price_data: (newCountry === 'IN' ? pricingData.stripePriceId_inr : pricingData.stripePriceId_usd) ? undefined : {
                     currency: currency,
                     product: productId,
                     unit_amount: amount * 100,

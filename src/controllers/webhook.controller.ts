@@ -44,13 +44,43 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
 
                 // If this was a verification payment, update the user record in Firestore
                 if (paymentIntent.metadata?.userId && paymentIntent.metadata?.type === 'ONE_TIME_VERIFICATION') {
-                    logger.info(`✅ Mark user ${paymentIntent.metadata.userId} as VERIFIED via PaymentIntent`);
-                    await db.collection('users').doc(paymentIntent.metadata.userId).update({
-                        verified: true,
-                        verificationStatus: 'verified',
-                        oneTimeFeeStatus: 'paid',
-                        updatedAt: FieldValue.serverTimestamp(),
-                    });
+                    const userId = paymentIntent.metadata.userId;
+                    const registrationId = paymentIntent.metadata.registrationId;
+
+                    if (registrationId) {
+                        logger.info(`✅ Mark company verification payment for user ${userId}, registration ${registrationId} as paid via PaymentIntent`);
+                        
+                        // 1. Update verification case
+                        const caseId = `CASE-COMPANY-${registrationId.slice(0, 8).toUpperCase()}`;
+                        await db.collection('verifications').doc(caseId).update({
+                            paymentStatus: 'paid',
+                            paidAt: FieldValue.serverTimestamp(),
+                            updatedAt: FieldValue.serverTimestamp(),
+                        }).catch(err => logger.error(`Failed to update verification case ${caseId}: ${err.message}`));
+
+                        // 2. Update company record — guard against overwriting an already-approved status
+                        const companySnap = await db.collection('companies').doc(registrationId).get();
+                        const curVerStatus = companySnap.data()?.verificationStatus;
+                        const protectedStatuses = ['approved', 'verified', 'decision_pending'];
+                        const companyPaymentUpdate: any = { paymentStatus: 'paid', updatedAt: FieldValue.serverTimestamp() };
+                        if (!protectedStatuses.includes(curVerStatus)) companyPaymentUpdate.verificationStatus = 'under_review';
+                        await db.collection('companies').doc(registrationId).update(companyPaymentUpdate)
+                            .catch(err => logger.error(`Failed to update company record ${registrationId}: ${err.message}`));
+
+                        // 3. Mark user fee as paid but DO NOT auto-verify
+                        await db.collection('users').doc(userId).update({
+                            oneTimeFeeStatus: 'paid',
+                            updatedAt: FieldValue.serverTimestamp(),
+                        });
+                    } else {
+                        logger.info(`✅ Mark personal user ${userId} as VERIFIED via PaymentIntent (No registrationId)`);
+                        await db.collection('users').doc(userId).update({
+                            verified: true,
+                            verificationStatus: 'verified',
+                            oneTimeFeeStatus: 'paid',
+                            updatedAt: FieldValue.serverTimestamp(),
+                        });
+                    }
                 } else {
                     logger.info(`ℹ️ PaymentIntent ${paymentIntent.id} did not match verification criteria. Metadata: ${JSON.stringify(paymentIntent.metadata)}`);
                 }
@@ -70,7 +100,8 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
             case 'customer.subscription.deleted':
                 const subscription = event.data.object as any;
                 const subUserId = subscription.metadata.userId;
-                const subPlanId = subscription.metadata.planId || subscription.items.data[0].price.id;
+                // Use metadata planId (e.g. '1_seat') first. Fall back to price ID only as last resort.
+                const subPlanId = subscription.metadata.planId || null;
                 const subRole = subscription.metadata.role || 'job_seeker';
                 
                 logger.info(`Subscription ${subscription.id} for user ${subUserId} reached status: ${subscription.status}`);
@@ -79,7 +110,8 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
                     const subData = {
                         userId: subUserId,
                         status: subscription.status,
-                        planId: subPlanId, // Use metadata planId if available
+                        planId: subPlanId, // Our logical plan name e.g. '1_seat'
+                        stripePriceId: subscription.items.data[0]?.price?.id || null, // raw Stripe price ID stored separately
                         role: subRole,
                         currentPeriodEnd: new Date(subscription.current_period_end * 1000),
                         updatedAt: FieldValue.serverTimestamp(),
@@ -146,13 +178,43 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
                     }, { merge: true });
 
                 } else if (session.metadata?.userId && session.metadata?.type === 'ONE_TIME_VERIFICATION') {
-                    logger.info(`✅ Mark user ${session.metadata.userId} as VERIFIED via CheckoutSession`);
-                    await db.collection('users').doc(session.metadata.userId).update({
-                        verified: true,
-                        verificationStatus: 'verified',
-                        oneTimeFeeStatus: 'paid',
-                        updatedAt: FieldValue.serverTimestamp(),
-                    });
+                    const userId = session.metadata.userId;
+                    const registrationId = session.metadata.registrationId;
+
+                    if (registrationId) {
+                        logger.info(`✅ Mark company verification payment for user ${userId}, registration ${registrationId} as paid via CheckoutSession`);
+                        
+                        // 1. Update verification case
+                        const caseId = `CASE-COMPANY-${registrationId.slice(0, 8).toUpperCase()}`;
+                        await db.collection('verifications').doc(caseId).update({
+                            paymentStatus: 'paid',
+                            paidAt: FieldValue.serverTimestamp(),
+                            updatedAt: FieldValue.serverTimestamp(),
+                        }).catch(err => logger.error(`Failed to update verification case ${caseId}: ${err.message}`));
+
+                        // 2. Update company record — guard against overwriting an already-approved status
+                        const companySnap2 = await db.collection('companies').doc(registrationId).get();
+                        const curVerStatus2 = companySnap2.data()?.verificationStatus;
+                        const protectedStatuses2 = ['approved', 'verified', 'decision_pending'];
+                        const companyPaymentUpdate2: any = { paymentStatus: 'paid', updatedAt: FieldValue.serverTimestamp() };
+                        if (!protectedStatuses2.includes(curVerStatus2)) companyPaymentUpdate2.verificationStatus = 'under_review';
+                        await db.collection('companies').doc(registrationId).update(companyPaymentUpdate2)
+                            .catch(err => logger.error(`Failed to update company record ${registrationId}: ${err.message}`));
+
+                        // 3. Mark user fee as paid but DO NOT auto-verify
+                        await db.collection('users').doc(userId).update({
+                            oneTimeFeeStatus: 'paid',
+                            updatedAt: FieldValue.serverTimestamp(),
+                        });
+                    } else {
+                        logger.info(`✅ Mark personal user ${userId} as VERIFIED via CheckoutSession (No registrationId)`);
+                        await db.collection('users').doc(userId).update({
+                            verified: true,
+                            verificationStatus: 'verified',
+                            oneTimeFeeStatus: 'paid',
+                            updatedAt: FieldValue.serverTimestamp(),
+                        });
+                    }
 
                     // Also log to payments collection
                     await db.collection('payments').doc(session.id).set({
