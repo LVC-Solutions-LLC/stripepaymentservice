@@ -158,23 +158,37 @@ export class PaymentService {
         amount?: number,
         currency?: string,
         label?: string,
-        registrationId?: string
+        registrationId?: string,
+        type?: string,
+        addonId?: string,
+        inputPriceId?: string
     ) {
         const stripe = getStripe(stripeMode);
         
         // 1. Resolve Product and Pricing
-        const productId = await this.getOrCreateOneTimeProduct(role, stripeMode);
+        let productId = await this.getOrCreateOneTimeProduct(role, stripeMode);
         const pricingDoc = await db.collection('configurations').doc('pricing').get();
         const pricingData = pricingDoc.data() || {};
-        const oneTimeData = pricingData.verificationFees?.[role] || pricingData.oneTime?.[role];
+        
+        let oneTimeData: any = null;
+        const isLayoff = planId?.startsWith('layoff_');
+        const layoffTierId = isLayoff ? planId?.replace('layoff_', '') : null;
+
+        if (isLayoff && layoffTierId) {
+            oneTimeData = pricingData.subscriptions?.layoff_mode?.[layoffTierId];
+        } else if (type === 'ONE_TIME_ADDON' && addonId) {
+            oneTimeData = pricingData.addons?.[addonId];
+        } else {
+            oneTimeData = pricingData.verificationFees?.[role] || pricingData.oneTime?.[role];
+        }
         const isIndia = country === 'IN';
         const countryKey = isIndia ? 'india' : 'global';
         const regionData = oneTimeData?.[countryKey];
 
         // Robust numeric resolution: prefer new region-nested price, then legacy flat price, then hardcoded default
         const dbAmountNumeric = isIndia 
-            ? (Number(regionData?.price_inr || oneTimeData?.price_inr || oneTimeData?.IN) || 0)
-            : (Number(regionData?.price_usd || oneTimeData?.price_usd || oneTimeData?.US) || 0);
+            ? (Number(regionData?.price_inr || regionData || oneTimeData?.price_inr || oneTimeData?.india || oneTimeData?.IN) || 0)
+            : (Number(regionData?.price_usd || regionData || oneTimeData?.price_usd || oneTimeData?.global || oneTimeData?.US) || 0);
 
         // 2. Calculate amount & currency
         const finalizedCurrency = (currency || (isIndia ? 'inr' : 'usd')).toLowerCase();
@@ -183,7 +197,7 @@ export class PaymentService {
              ? Math.round(Number(amount) * 100) 
              : (dbAmountNumeric > 0 ? dbAmountNumeric : getOneTimeFee(role, country));
         
-        const finalizedLabel = label || `${role.replace(/_/g, ' ').toUpperCase()} Identity Verification`;
+        const finalizedLabel = label || (addonId ? addonId.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : `${role.replace(/_/g, ' ').toUpperCase()} Identity Verification`);
         const finalizedDescription = label ? `Payment for ${label}` : `One-time KYC verification fee for ${country}`;
 
         // 2. Find or Create User
@@ -218,12 +232,17 @@ export class PaymentService {
             }
         }
 
-        const isLayoff = planId?.startsWith('layoff_');
-
         // Resolve Price ID
-        const priceId = isIndia 
+        const priceId = inputPriceId || (isIndia 
             ? (regionData?.stripePriceId_inr || oneTimeData?.stripePriceId_inr) 
-            : (regionData?.stripePriceId_usd || oneTimeData?.stripePriceId_usd);
+            : (regionData?.stripePriceId_usd || oneTimeData?.stripePriceId_usd));
+
+        // Use synced Product ID if available for add-ons
+        if (oneTimeData?.stripeProductId) {
+            productId = oneTimeData.stripeProductId;
+        } else if (regionData?.stripeProductId) {
+             productId = regionData.stripeProductId;
+        }
 
         // 3. Create Checkout Session
         const session = await stripe.checkout.sessions.create({
@@ -240,6 +259,7 @@ export class PaymentService {
                 },
             ],
             mode: 'payment',
+            allow_promotion_codes: true,
             success_url: successUrl,
             cancel_url: cancelUrl,
             payment_intent_data: {
@@ -252,9 +272,10 @@ export class PaymentService {
             },
             metadata: {
                 userId,
-                type: isLayoff ? 'LAYOFF_PAYMENT' : 'ONE_TIME_VERIFICATION',
+                type: type || (isLayoff ? 'LAYOFF_PAYMENT' : 'ONE_TIME_VERIFICATION'),
                 registrationId: registrationId || '',
                 planId: planId || '',
+                addonId: addonId || '',
             },
         });
 
@@ -296,7 +317,71 @@ export class PaymentService {
                     return {
                         status: 'success',
                         message: 'Layoff payment verified',
-                        verified: true
+                        verified: true,
+                        type,
+                        registrationId,
+                        planId,
+                        amountTotal,
+                        currency
+                    };
+                }
+
+                if (type === 'ONE_TIME_ADDON') {
+                    const registrationId = metadata.registrationId;
+                    const addonId = metadata.addonId;
+                    const quantity = Number(metadata.quantity || 1);
+
+                    if (registrationId && addonId) {
+                        const companyRef = db.collection('companies').doc(registrationId);
+                        
+                        await db.runTransaction(async (transaction) => {
+                            const companySnap = await transaction.get(companyRef);
+                            const companyData = companySnap.data() || {};
+                            const existingAddons = Array.isArray(companyData.addonPurchases) ? companyData.addonPurchases : [];
+                            const addonAlreadyRecorded = existingAddons.some((addon: any) => addon?.sessionId && addon.sessionId === session.id);
+
+                            if (!addonAlreadyRecorded) {
+                                const purchasedAt = new Date();
+                                const expiresAt = new Date(purchasedAt);
+                                expiresAt.setDate(expiresAt.getDate() + 30);
+
+                                const updateData: any = {
+                                    updatedAt: FieldValue.serverTimestamp()
+                                };
+
+                                if (addonId === 'extra_recruiter_seat') {
+                                    updateData.extraRecruiterSeats = FieldValue.increment(1);
+                                    logger.info(`[verifySession] ➕ Incrementing extraRecruiterSeats for ${registrationId}`);
+                                } else if (addonId === 'extra_job_posting') {
+                                    updateData.extraJobPostings = FieldValue.increment(1);
+                                    logger.info(`[verifySession] ➕ Incrementing extraJobPostings for ${registrationId}`);
+                                }
+
+                                updateData.addonPurchases = FieldValue.arrayUnion({
+                                    type: addonId,
+                                    quantity: 1,
+                                    purchasedAt,
+                                    expiresAt,
+                                    sessionId: session.id,
+                                    status: 'active',
+                                });
+
+                                transaction.update(companyRef, updateData);
+                            }
+                        }).catch(err => {
+                            logger.error(`[verifySession] ❌ Transaction failed for ${addonId}: ${err.message}`);
+                        });
+                    }
+
+                    return {
+                        status: 'success',
+                        message: 'Addon payment verified',
+                        verified: true,
+                        type,
+                        addonId,
+                        registrationId,
+                        quantity,
+                        sessionId: session.id,
                     };
                 }
 

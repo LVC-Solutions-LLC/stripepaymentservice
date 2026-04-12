@@ -225,6 +225,67 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
                         type: 'ONE_TIME_VERIFICATION',
                         updatedAt: FieldValue.serverTimestamp(),
                     }, { merge: true });
+                } else if (session.metadata?.userId && session.metadata?.type === 'ONE_TIME_ADDON') {
+                    const userId = session.metadata.userId;
+                    const registrationId = session.metadata.registrationId;
+                    const addonId = session.metadata.addonId;
+
+                    logger.info(`✅ Processing ONE_TIME_ADDON purchase: ${addonId} for company ${registrationId}`);
+
+                    if (registrationId && addonId) {
+                        const companyRef = db.collection('companies').doc(registrationId);
+                        const companySnap = await companyRef.get();
+                        const companyData = companySnap.data() || {};
+                        const existingAddons = Array.isArray(companyData.addonPurchases) ? companyData.addonPurchases : [];
+                        const addonAlreadyRecorded = existingAddons.some((addon: any) => addon?.sessionId && addon.sessionId === session.id);
+
+                        if (!addonAlreadyRecorded) {
+                            const purchasedAt = new Date();
+                            const expiresAt = new Date(purchasedAt);
+                            expiresAt.setDate(expiresAt.getDate() + 30);
+
+                            // Increment specific limits based on addonId along with pushing to the array
+                            const updateData: any = {
+                                updatedAt: FieldValue.serverTimestamp()
+                            };
+
+                            if (addonId === 'extra_recruiter_seat') {
+                                updateData.extraRecruiterSeats = FieldValue.increment(1);
+                                logger.info(`➕ Incrementing extraRecruiterSeats for ${registrationId}`);
+                            } else if (addonId === 'extra_job_posting') {
+                                updateData.extraJobPostings = FieldValue.increment(1);
+                                logger.info(`➕ Incrementing extraJobPostings for ${registrationId}`);
+                            }
+
+                            updateData.addonPurchases = FieldValue.arrayUnion({
+                                type: addonId,
+                                quantity: 1,
+                                purchasedAt,
+                                expiresAt,
+                                sessionId: session.id,
+                                status: 'active',
+                            });
+
+                            await companyRef.update(updateData).catch(err => {
+                                logger.error(`❌ Failed to record addon purchase history and limit for ${addonId}: ${err.message}`);
+                            });
+                        } else {
+                            logger.info(`ℹ️ Addon ${addonId} for session ${session.id} already recorded. Skipping.`);
+                        }
+                    }
+
+                    // Log to payments collection
+                    await db.collection('payments').doc(session.id).set({
+                        userId: session.metadata.userId,
+                        amount: session.amount_total,
+                        currency: session.currency,
+                        status: 'succeeded',
+                        type: 'ONE_TIME_ADDON',
+                        addonId: addonId || null,
+                        registrationId: registrationId || null,
+                        updatedAt: FieldValue.serverTimestamp(),
+                    }, { merge: true });
+
                 } else {
                     logger.info(`ℹ️ CheckoutSession ${session.id} did not match verification criteria. Metadata: ${JSON.stringify(session.metadata)}`);
                 }

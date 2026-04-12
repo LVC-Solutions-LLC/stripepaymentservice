@@ -29,14 +29,17 @@ export const createVerificationCheckoutSchema = z.object({
         currency: z.string().optional(),
         label: z.string().optional(),
         registrationId: z.string().optional(),
+        type: z.string().optional(),
+        addonId: z.string().optional(),
+        priceId: z.string().optional(),
     }),
 });
 
 export const createVerificationCheckoutSession = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const { userId, email, role, country, successUrl, cancelUrl, stripeMode, planId, amount, currency, label, registrationId } = req.body;
+        const { userId, email, role, country, successUrl, cancelUrl, stripeMode, planId, amount, currency, label, registrationId, type, addonId, priceId } = req.body;
         const result = await paymentService.createVerificationCheckoutSession(
-            userId, email, role, country, successUrl, cancelUrl, stripeMode, planId, amount, currency, label, registrationId
+            userId, email, role, country, successUrl, cancelUrl, stripeMode, planId, amount, currency, label, registrationId, type, addonId, priceId
         );
 
         res.status(200).json({

@@ -66,11 +66,21 @@ export class SubscriptionService {
         const pricingRegion = pricingData[countryKey];
         if (!pricingRegion) throw new AppError(`No price defined for country: ${country}`, 404);
 
+        // Handle legacy vs new object format
         const pricePaise = country === 'IN' ? 
-            (Number(pricingRegion.price_inr) || Number(pricingRegion.IN) || 0) : 
-            (Number(pricingRegion.price_usd) || Number(pricingRegion.US) || 0);
+            (Number(pricingRegion.price_inr) || (Number(pricingRegion.max || pricingRegion.IN || 0) * 100)) : 
+            (Number(pricingRegion.price_usd) || (Number(pricingRegion.max || pricingRegion.US || 0) * 100));
 
         const currency = country === 'IN' ? 'inr' : 'usd';
+        const priceId = country === 'IN' ? pricingRegion.stripePriceId_inr : pricingRegion.stripePriceId_usd;
+
+        console.log(`[SubscriptionService] Creating Checkout Session:`, {
+            userId, email, role, planId, country,
+            productId,
+            priceId: priceId || 'NONE',
+            fallbackPricePaise: pricePaise,
+            currency
+        });
 
         // 2. Find or Create User
         const userRef = db.collection('users').doc(userId);
@@ -108,8 +118,6 @@ export class SubscriptionService {
             // Ignore this error to allow frontend to test checkout
         }
 
-        const priceId = country === 'IN' ? pricingRegion.stripePriceId_inr : pricingRegion.stripePriceId_usd;
-
         // 3. Create Stripe Checkout Session for Subscription
         const session = await stripe.checkout.sessions.create({
             customer: stripeCustomerId!,
@@ -124,6 +132,7 @@ export class SubscriptionService {
                 quantity: 1,
             }],
             mode: 'subscription',
+            allow_promotion_codes: true,
             success_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard?payment=success&type=subscription&session_id={CHECKOUT_SESSION_ID}`,
             cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard?payment=cancel`,
             metadata: { 

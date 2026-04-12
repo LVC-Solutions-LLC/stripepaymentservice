@@ -36,3 +36,19 @@ export const syncPricing = async (req: Request, res: Response, next: NextFunctio
         });
     }
 };
+
+export const syncFullPricing = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const result = await adminPricingService.syncFullPricingConfig(req.body, req.body.stripeMode);
+        res.status(200).json({
+            status: 'success',
+            data: result
+        });
+    } catch (err: any) {
+        console.error("syncFullPricing Error:", err);
+        res.status(400).json({
+            status: 'error',
+            message: err.message
+        });
+    }
+};
