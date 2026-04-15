@@ -14,7 +14,8 @@ export const stripeLive = new Stripe(env.STRIPE_LIVE_SECRET_KEY || env.STRIPE_SE
  * Defaults to stripeTest if mode is invalid or not provided.
  */
 export const getStripe = (mode?: 'test' | 'live') => {
-    if (mode === 'live') return stripeLive;
+    const effectiveMode = mode || env.STRIPE_MODE;
+    if (effectiveMode === 'live') return stripeLive;
     return stripeTest;
 };
 

@@ -8,7 +8,7 @@ export const createSubscriptionSchema = z.object({
     body: z.object({
         userId: z.string().uuid().or(z.string().min(1)),
         email: z.string().email(),
-        role: z.enum(['job_seeker', 'company']),
+        role: z.string(),
         country: z.string().length(2),
         planId: z.string().optional(),
         stripeMode: z.enum(['test', 'live']).optional(),

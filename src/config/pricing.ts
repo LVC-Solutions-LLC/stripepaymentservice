@@ -18,6 +18,14 @@ export const ONE_TIME_FEES: Record<string, Record<string, number>> = {
         'IN': 499900, // ₹4,999
         'US': 14900,  // $149.00
     },
+    'university': {
+        'IN': 999900, // ₹9,999
+        'US': 29900,  // $299.00
+    },
+    'sales_champion': {
+        'IN': 299900, // ₹2,999
+        'US': 7900,   // $79.00
+    },
     'test': {
         'IN': 100,
         'US': 100,

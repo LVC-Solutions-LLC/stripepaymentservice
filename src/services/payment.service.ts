@@ -53,7 +53,7 @@ export class PaymentService {
                     await stripe.customers.retrieve(stripeCustomerId);
                 } catch (err: any) {
                     // If customer not found (e.g., from old test environment), reset it
-                    if (err.code === 'resource_missing' || err.status === 404) {
+                    if (err.code === 'resource_missing' || err.status === 404 || (err.raw && err.raw.status === 404)) {
                         console.log(`[INFO] Resetting invalid stripeCustomerId ${stripeCustomerId} for user ${userId}`);
                         stripeCustomerId = undefined;
                     } else {
@@ -217,7 +217,8 @@ export class PaymentService {
                 try {
                     await stripe.customers.retrieve(stripeCustomerId);
                 } catch (err: any) {
-                    if (err.code === 'resource_missing' || err.status === 404) {
+                    if (err.code === 'resource_missing' || err.status === 404 || (err.raw && err.raw.status === 404)) {
+                        console.log(`[INFO] Resetting invalid stripeCustomerId ${stripeCustomerId} for user ${userId}`);
                         stripeCustomerId = undefined;
                     } else {
                         throw err;
@@ -389,7 +390,7 @@ export class PaymentService {
                     const subscriptionId = session.subscription as string;
                     const planId = metadata.planId || 'standard';
                     const role = metadata.role || 'job_seeker';
-                    const registrationId = metadata.registrationId || '';
+                    const registrationId = metadata.registrationId;
 
                     if (subscriptionId) {
                         const subRef = db.collection('subscriptions').doc(subscriptionId);
@@ -414,6 +415,22 @@ export class PaymentService {
                             });
                             logger.info(`✅ [PaymentService] Created subscription record for ${subscriptionId}`);
                         }
+                    }
+
+                    if (planId?.startsWith('layoff_') && registrationId) {
+                        const amountTotal = session.amount_total ? session.amount_total / 100 : 0;
+                        const currency = session.currency?.toUpperCase() || 'USD';
+                        await db.collection('layoffRegistrations').doc(registrationId).update({
+                            layoffPaymentStatus: 'completed',
+                            status: 'under_review',
+                            subscriptionPlan: {
+                                planId: planId || 'layoff_unknown',
+                                planName: planId ? planId.replace('layoff_', '').toUpperCase() : 'Layoff Plan',
+                                price: `${amountTotal} ${currency}`
+                            },
+                            updatedAt: FieldValue.serverTimestamp(),
+                        });
+                        logger.info(`✅ [PaymentService] Updated layoffRegistrations status to completed for ${registrationId}`);
                     }
 
                     return {
