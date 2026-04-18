@@ -17,7 +17,14 @@ export const createIdentitySessionSchema = z.object({
 export const createIdentitySession = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { userId, email, role, returnUrl, stripeMode } = req.body;
-        const result = await identityService.createVerificationSession(userId, email, role, returnUrl, stripeMode);
+        // Signature: (userId: string, email: string, role: string, returnUrl?: string, stripeMode?: 'test' | 'live')
+        const result = await identityService.createVerificationSession(
+            userId as string,
+            email as string,
+            role as string,
+            returnUrl as string,
+            stripeMode as 'test' | 'live'
+        );
 
         res.status(200).json(result);
     } catch (err) {
@@ -38,7 +45,12 @@ export const getIdentitySession = async (req: Request, res: Response, next: Next
 
         console.log(`[POLL_REQUEST] Session: ${sessionId}, UserID: ${userId}, Mode: ${stripeMode || 'default'}`);
 
-        const session = await identityService.getVerificationSession(sessionId as string, stripeMode, userId);
+        // Signature: (sessionId: string, stripeMode?: 'test' | 'live', requestedUserId?: string)
+        const session = await identityService.getVerificationSession(
+            sessionId as string,
+            stripeMode as 'test' | 'live',
+            userId as string
+        );
 
         res.status(200).json(session);
     } catch (err) {

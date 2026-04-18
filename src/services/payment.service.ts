@@ -143,6 +143,32 @@ export class PaymentService {
         return productId;
     }
 
+    private async getOrCreateStripePrice(stripe: any, productId: string, amount: number, currency: string) {
+        try {
+            const prices = await stripe.prices.list({
+                product: productId,
+                currency: currency.toLowerCase(),
+                active: true,
+                limit: 100,
+            });
+
+            const existing = prices.data.find((p: any) => p.unit_amount === amount);
+            if (existing) {
+                return existing.id;
+            }
+
+            const newPrice = await stripe.prices.create({
+                product: productId,
+                unit_amount: amount,
+                currency: currency.toLowerCase(),
+            });
+            return newPrice.id;
+        } catch (error) {
+            console.error('[PaymentService] Error getting or creating Stripe Price:', error);
+            return null;
+        }
+    }
+
     /**
      * Create a Stripe Checkout Session for a one-time verification fee.
      */
@@ -245,40 +271,88 @@ export class PaymentService {
              productId = regionData.stripeProductId;
         }
 
+        // Dynamically create or fetch Price if missing (required for coupons to work)
+        let finalPriceId = priceId;
+        if (!finalPriceId && productId && finalizedAmount) {
+             finalPriceId = await this.getOrCreateStripePrice(stripe, productId, finalizedAmount, finalizedCurrency);
+        }
+
         // 3. Create Checkout Session
-        const session = await stripe.checkout.sessions.create({
-            customer: stripeCustomerId,
-            line_items: [
-                {
-                    price: priceId || undefined,
-                    price_data: priceId ? undefined : {
-                        currency: finalizedCurrency,
-                        product: productId,
-                        unit_amount: finalizedAmount,
+        let session;
+        try {
+            session = await stripe.checkout.sessions.create({
+                customer: stripeCustomerId,
+                line_items: [
+                    {
+                        price: finalPriceId || undefined,
+                        price_data: finalPriceId ? undefined : {
+                            currency: finalizedCurrency,
+                            product: productId,
+                            unit_amount: finalizedAmount,
+                        },
+                        quantity: 1,
                     },
-                    quantity: 1,
+                ],
+                mode: 'payment',
+                allow_promotion_codes: true,
+                success_url: successUrl,
+                cancel_url: cancelUrl,
+                payment_intent_data: {
+                    metadata: {
+                        userId,
+                        type: isLayoff ? 'LAYOFF_PAYMENT' : 'ONE_TIME_VERIFICATION',
+                        registrationId: registrationId || '',
+                        planId: planId || '',
+                    },
                 },
-            ],
-            mode: 'payment',
-            allow_promotion_codes: true,
-            success_url: successUrl,
-            cancel_url: cancelUrl,
-            payment_intent_data: {
                 metadata: {
                     userId,
-                    type: isLayoff ? 'LAYOFF_PAYMENT' : 'ONE_TIME_VERIFICATION',
+                    type: type || (isLayoff ? 'LAYOFF_PAYMENT' : 'ONE_TIME_VERIFICATION'),
                     registrationId: registrationId || '',
                     planId: planId || '',
+                    addonId: addonId || '',
                 },
-            },
-            metadata: {
-                userId,
-                type: type || (isLayoff ? 'LAYOFF_PAYMENT' : 'ONE_TIME_VERIFICATION'),
-                registrationId: registrationId || '',
-                planId: planId || '',
-                addonId: addonId || '',
-            },
-        });
+            });
+        } catch (err: any) {
+            // If the error is specifically about an inactive price, retry using inline price_data
+            if (finalPriceId && (err.message.includes('inactive') || err.message.includes('No such price'))) {
+                console.warn(`⚠️ [PaymentService] Price ${finalPriceId} is inactive or missing. Falling back to inline price_data.`);
+                session = await stripe.checkout.sessions.create({
+                    customer: stripeCustomerId,
+                    line_items: [
+                        {
+                            price_data: {
+                                currency: finalizedCurrency,
+                                product: productId,
+                                unit_amount: finalizedAmount,
+                            },
+                            quantity: 1,
+                        },
+                    ],
+                    mode: 'payment',
+                    allow_promotion_codes: true,
+                    success_url: successUrl,
+                    cancel_url: cancelUrl,
+                    payment_intent_data: {
+                        metadata: {
+                            userId,
+                            type: isLayoff ? 'LAYOFF_PAYMENT' : 'ONE_TIME_VERIFICATION',
+                            registrationId: registrationId || '',
+                            planId: planId || '',
+                        },
+                    },
+                    metadata: {
+                        userId,
+                        type: type || (isLayoff ? 'LAYOFF_PAYMENT' : 'ONE_TIME_VERIFICATION'),
+                        registrationId: registrationId || '',
+                        planId: planId || '',
+                        addonId: addonId || '',
+                    },
+                });
+            } else {
+                throw err;
+            }
+        }
 
         return {
             url: session.url,

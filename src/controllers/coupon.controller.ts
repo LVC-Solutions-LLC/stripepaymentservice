@@ -21,7 +21,7 @@ export const createCouponSchema = z.object({
         durationMonths: z.number().int().positive().optional(),
         maxRedemptions: z.number().int().positive().optional(),
         expiresAt: z.string().datetime({ offset: true }).optional(),
-        productKeys: z.array(z.string()).optional().default([]),
+        productKeys: z.array(z.string()).nullish().transform(val => val ?? []),
         stripeMode: z.enum(['test', 'live']).optional().default('test'),
     }),
 });
@@ -49,7 +49,9 @@ export const listCouponsSchema = z.object({
  */
 export const createCoupon = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const { productKeys = [], stripeMode = 'test', ...rest } = req.body;
+        const { stripeMode = 'test', ...rest } = req.body;
+        const productKeys = req.body.productKeys || [];
+        delete rest.productKeys;
 
         // Resolve friendly product keys to Stripe Product IDs if provided
         let stripeProductIds: string[] = [];
