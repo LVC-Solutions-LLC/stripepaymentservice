@@ -27,10 +27,6 @@ app.use(express.json());
 app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/subscriptions', subscriptionRoutes);
 app.use('/api/v1/pricing', pricingRoutes);
-// Routes
-app.use('/api/v1/payments', paymentRoutes);
-app.use('/api/v1/subscriptions', subscriptionRoutes);
-app.use('/api/v1/pricing', pricingRoutes);
 app.use('/api/v1/identity', identityRoutes);
 
 // Root Endpoint

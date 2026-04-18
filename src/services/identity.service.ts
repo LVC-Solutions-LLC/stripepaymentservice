@@ -12,26 +12,35 @@ export class IdentityService {
         userId: string,
         email: string,
         role: string,
+        returnUrl?: string,
         stripeMode?: 'test' | 'live'
     ) {
         const stripe = getStripe(stripeMode);
-        // 1. Check if user exists or create them
         const userRef = db.collection('users').doc(userId);
         const userDoc = await userRef.get();
 
+        const statusUpdate = {
+            identityVerificationStatus: 'unverified',
+            identityDocumentStatus: 'unverified',
+            updatedAt: FieldValue.serverTimestamp(),
+        };
+
         if (!userDoc.exists) {
-            // If user doesn't exist, we might want to create them or throw error.
-            // For now, let's just ensure we have a record to update later via webhooks.
+            // Create new user record
             await userRef.set({
                 email,
                 role,
-                verificationStatus: 'requires_input',
+                ...statusUpdate,
                 createdAt: FieldValue.serverTimestamp(),
             });
+        } else {
+            // Update existing user status to reset it for the new session
+            await userRef.update(statusUpdate);
         }
 
         // 2. Create VerificationSession
-        // We configure it to require document and selfie for all roles requested
+        console.log(`[STRIPE] Creating session for user: ${userId}, email: ${email}, role: ${role}`);
+
         const session = await stripe.identity.verificationSessions.create({
             type: 'document',
             options: {
@@ -39,12 +48,13 @@ export class IdentityService {
                     require_matching_selfie: true,
                 },
             },
+            client_reference_id: userId,
             metadata: {
                 userId,
                 email,
                 role,
             },
-            return_url: `${env.FRONTEND_URL}/verification-status?session_id={VERIFICATION_SESSION_ID}`, // Corrected placeholder
+            return_url: returnUrl || `${env.FRONTEND_URL}/verification-status`,
         });
 
         console.log(`✅ Identity Session created for user ${userId}: ${session.id}`);
@@ -66,8 +76,73 @@ export class IdentityService {
         };
     }
 
-    async getVerificationSession(sessionId: string, stripeMode?: 'test' | 'live') {
+    async getVerificationSession(sessionId: string, stripeMode?: 'test' | 'live', requestedUserId?: string) {
         const stripe = getStripe(stripeMode);
-        return await stripe.identity.verificationSessions.retrieve(sessionId);
+        const session = await stripe.identity.verificationSessions.retrieve(sessionId);
+
+        // SYNC LOGIC: If we got a status, update Firestore to prevent stale records if webhooks were missed
+        const userId = session.metadata?.userId || session.client_reference_id || requestedUserId;
+
+        if (userId) {
+            const status = session.status;
+
+            const dbStatus = status === 'verified' ? 'verified' :
+                status === 'requires_input' ? 'requires_input' :
+                    status === 'processing' ? 'processing' :
+                        status === 'canceled' ? 'failed' : status;
+
+            console.log(`[SYNC] Updating Firestore for user ${userId}. New status: ${dbStatus}`);
+
+            const userUpdate = await db.collection('users').doc(userId).update({
+                identityVerificationStatus: dbStatus,
+                identityDocumentStatus: dbStatus,
+                updatedAt: FieldValue.serverTimestamp(),
+            });
+
+            console.log(`[SYNC] User document updated at: ${userUpdate.writeTime.toDate().toISOString()}`);
+
+            const verificationUpdate = await db.collection('verifications').doc(sessionId).set({
+                userId,
+                status: status,
+                updatedAt: FieldValue.serverTimestamp(),
+            }, { merge: true });
+
+            console.log(`[SYNC] Verification record updated at: ${verificationUpdate.writeTime.toDate().toISOString()}`);
+        }
+
+        return session;
+    }
+
+    async getLatestVerificationSession(userId: string, stripeMode: 'test' | 'live' = 'test'): Promise<any> {
+        console.log(`[LATEST] Fetching last verification for user: ${userId}`);
+
+        // WORKAROUND: Remove .orderBy() to avoid requiring a composite index in new environments (QA/Dev)
+        // Since a user has very few verification sessions (usually 1-3), in-memory sort is perfectly fine.
+        const snapshot = await db.collection('verifications')
+            .where('userId', '==', userId)
+            .get();
+
+        if (snapshot.empty) {
+            console.log(`[LATEST] No sessions found for user ${userId}`);
+            return null;
+        }
+
+        // Sort in memory by createdAt descending
+        const docs = snapshot.docs.map(d => ({ 
+            id: d.id, 
+            ...d.data() 
+        })) as any[];
+
+        docs.sort((a, b) => {
+            const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt?._seconds || 0) * 1000;
+            const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt?._seconds || 0) * 1000;
+            return timeB - timeA;
+        });
+
+        const latestDoc = docs[0];
+        const sessionId = latestDoc.id;
+        console.log(`[LATEST] Found session ID: ${sessionId} via in-memory sort. Fetching from Stripe...`);
+
+        return this.getVerificationSession(sessionId, stripeMode, userId);
     }
 }
