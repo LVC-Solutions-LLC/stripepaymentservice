@@ -38,3 +38,6 @@ coverage/
 # Misc
 .npm/
 .eslintcache
+
+.env
+.env.*

@@ -68,17 +68,35 @@ export class AdminPricingService {
         // 3. Update Firestore back with new Price IDs if they changed
         const updateData: any = {};
         if (role === 'addon' && tier) {
+            // Dual-sync: Update root AND regional nested objects
             updateData[`addons.${tier}.stripeProductId`] = stripeProductId;
             updateData[`addons.${tier}.stripePriceId_inr`] = newPriceIdInr;
             updateData[`addons.${tier}.stripePriceId_usd`] = newPriceIdUsd;
+
+            updateData[`addons.${tier}.india.stripePriceId_inr`] = newPriceIdInr;
+            updateData[`addons.${tier}.india.stripeProductId`] = stripeProductId;
+            updateData[`addons.${tier}.global.stripePriceId_usd`] = newPriceIdUsd;
+            updateData[`addons.${tier}.global.stripeProductId`] = stripeProductId;
         } else if (type === 'ONE_TIME') {
+            // Dual-sync for verification fees
             updateData[`oneTime.${role}.stripeProductId`] = stripeProductId;
             updateData[`oneTime.${role}.stripePriceId_inr`] = newPriceIdInr;
             updateData[`oneTime.${role}.stripePriceId_usd`] = newPriceIdUsd;
+            
+            updateData[`oneTime.${role}.india.stripePriceId_inr`] = newPriceIdInr;
+            updateData[`oneTime.${role}.india.stripeProductId`] = stripeProductId;
+            updateData[`oneTime.${role}.global.stripePriceId_usd`] = newPriceIdUsd;
+            updateData[`oneTime.${role}.global.stripeProductId`] = stripeProductId;
         } else if (tier) {
+            // Dual-sync for subscriptions
             updateData[`subscriptions.${role}.${tier}.stripeProductId`] = stripeProductId;
             updateData[`subscriptions.${role}.${tier}.stripePriceId_inr`] = newPriceIdInr;
             updateData[`subscriptions.${role}.${tier}.stripePriceId_usd`] = newPriceIdUsd;
+
+            updateData[`subscriptions.${role}.${tier}.india.stripePriceId_inr`] = newPriceIdInr;
+            updateData[`subscriptions.${role}.${tier}.india.stripeProductId`] = stripeProductId;
+            updateData[`subscriptions.${role}.${tier}.global.stripePriceId_usd`] = newPriceIdUsd;
+            updateData[`subscriptions.${role}.${tier}.global.stripeProductId`] = stripeProductId;
         }
 
         await db.collection('configurations').doc('pricing').update(updateData);

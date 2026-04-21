@@ -12,9 +12,15 @@ export class SubscriptionService {
         // 1. Check if we already have it in Firestore
         const pricingDoc = await db.collection('configurations').doc('pricing').get();
         if (pricingDoc.exists) {
-            const subscriptions = pricingDoc.data()?.subscriptions;
-            const stripeProductId = subscriptions?.[role]?.[planId]?.stripeProductId;
-            if (stripeProductId) return stripeProductId;
+            if (planId.startsWith('layoff_')) {
+                const tier = planId.replace('layoff_', '');
+                const stripeProductId = pricingDoc.data()?.subscriptions?.layoff_mode?.[tier]?.stripeProductId;
+                if (stripeProductId) return stripeProductId;
+            } else {
+                const subscriptions = pricingDoc.data()?.subscriptions;
+                const stripeProductId = subscriptions?.[role]?.[planId]?.stripeProductId;
+                if (stripeProductId) return stripeProductId;
+            }
         }
 
         const productName = `LVC Fair Job: ${role.replace(/_/g, ' ').toUpperCase()} Subscription`;
@@ -58,21 +64,58 @@ export class SubscriptionService {
         const pricingDoc = await db.collection('configurations').doc('pricing').get();
         if (!pricingDoc.exists) throw new AppError('Pricing configuration not found', 500);
         
-        const subscriptions = pricingDoc.data()?.subscriptions;
-        const pricingData = subscriptions?.[role]?.[planId];
+        let pricingData;
+        if (planId.startsWith('layoff_')) {
+            const tier = planId.replace('layoff_', '');
+            pricingData = pricingDoc.data()?.subscriptions?.layoff_mode?.[tier];
+        } else {
+            const subscriptions = pricingDoc.data()?.subscriptions;
+            pricingData = subscriptions?.[role]?.[planId];
+        }
         if (!pricingData) throw new AppError(`No subscription plan found for role: ${role}, plan: ${planId}`, 404);
 
         const countryKey = country === 'IN' ? 'india' : 'global';
-        const pricingRegion = pricingData[countryKey];
-        if (!pricingRegion) throw new AppError(`No price defined for country: ${country}`, 404);
-
-        // Handle legacy vs new object format
-        const pricePaise = country === 'IN' ? 
-            (Number(pricingRegion.price_inr) || (Number(pricingRegion.max || pricingRegion.IN || 0) * 100)) : 
-            (Number(pricingRegion.price_usd) || (Number(pricingRegion.max || pricingRegion.US || 0) * 100));
-
         const currency = country === 'IN' ? 'inr' : 'usd';
-        const priceId = country === 'IN' ? pricingRegion.stripePriceId_inr : pricingRegion.stripePriceId_usd;
+
+        // The Firestore pricing doc stores region prices as flat numbers at the tier level:
+        // e.g. { india: 1999900, global: 19900, stripePriceId_inr: 'price_xxx', stripePriceId_usd: 'price_yyy' }
+        // OR as nested objects: { india: { price_inr: 1999900, stripePriceId_inr: 'price_xxx' }, ... }
+        const regionValue = pricingData[countryKey];
+        if (regionValue === undefined || regionValue === null) {
+            throw new AppError(`No price defined for country: ${country}`, 404);
+        }
+
+        let pricePaise: number;
+        let priceId: string | undefined;
+
+        if (typeof regionValue === 'number') {
+            // Flat format (from our seed script): india/global is a number in the smallest unit (paise/cents)
+            pricePaise = regionValue;
+            // Price IDs are stored at tier level, not inside region
+            priceId = country === 'IN' ? pricingData.stripePriceId_inr : pricingData.stripePriceId_usd;
+        } else if (typeof regionValue === 'object') {
+            // Nested format: { price_inr: ..., stripePriceId_inr: ... }
+            pricePaise = country === 'IN'
+                ? (Number(regionValue.price_inr || regionValue.IN || regionValue.max || 0))
+                : (Number(regionValue.price_usd || regionValue.US || regionValue.max || 0));
+            priceId = country === 'IN' ? regionValue.stripePriceId_inr : regionValue.stripePriceId_usd;
+            // Also check tier-level price IDs as fallback
+            if (!priceId) {
+                priceId = country === 'IN' ? pricingData.stripePriceId_inr : pricingData.stripePriceId_usd;
+            }
+        } else {
+            throw new AppError(`Invalid pricing format for country: ${country}`, 500);
+        }
+
+        // CRITICAL: Never allow a zero-amount subscription to proceed.
+        // pricePaise must be > 0 regardless of whether a priceId is set.
+        if (pricePaise <= 0) {
+            throw new AppError(
+                `Subscription price resolved to zero for plan: ${planId}, country: ${country}. ` +
+                `Re-seed pricing data with correct amounts in smallest currency units (paise/cents).`,
+                500
+            );
+        }
 
         console.log(`[SubscriptionService] Creating Checkout Session:`, {
             userId, email, role, planId, country,
@@ -99,6 +142,22 @@ export class SubscriptionService {
         } else {
             const userData = userDoc.data();
             stripeCustomerId = userData?.stripeCustomerId;
+
+            if (stripeCustomerId) {
+                try {
+                    // Verify the customer exists in the CURRENT Stripe environment (Live vs Test)
+                    await stripe.customers.retrieve(stripeCustomerId);
+                } catch (err: any) {
+                    // If customer not found (e.g., from old test environment), reset it
+                    if (err.code === 'resource_missing' || err.status === 404 || (err.raw && err.raw.status === 404)) {
+                        console.log(`[INFO] Resetting invalid stripeCustomerId ${stripeCustomerId} for user ${userId}`);
+                        stripeCustomerId = undefined;
+                    } else {
+                        throw err; // Rethrow other unexpected errors
+                    }
+                }
+            }
+
             if (!stripeCustomerId) {
                 const customer = await stripe.customers.create({ email, metadata: { userId } });
                 stripeCustomerId = customer.id;
@@ -119,16 +178,17 @@ export class SubscriptionService {
         }
 
         // 3. Create Stripe Checkout Session for Subscription
+        // IMPORTANT: Prefer stored priceId. Inline price_data can accidentally show invalid or zero values if pricePaise is miscalculated.
         const session = await stripe.checkout.sessions.create({
             customer: stripeCustomerId!,
             line_items: [{ 
                 price: priceId || undefined,
-                price_data: priceId ? undefined : {
+                price_data: priceId ? undefined : (pricePaise > 0 ? {
                     currency: currency,
                     product: productId,
                     unit_amount: pricePaise,
                     recurring: { interval: 'month' },
-                },
+                } : undefined),
                 quantity: 1,
             }],
             mode: 'subscription',

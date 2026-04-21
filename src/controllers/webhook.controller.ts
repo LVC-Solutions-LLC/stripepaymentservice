@@ -4,6 +4,9 @@ import { env } from '../config/env';
 import { db } from '../config/db';
 import { logger } from '../utils/logger';
 import { FieldValue } from 'firebase-admin/firestore';
+import { IdentityService } from '../services/identity.service';
+
+const identityService = new IdentityService();
 
 export const handleStripeWebhook = async (req: Request, res: Response) => {
     const signature = req.headers['stripe-signature'] as string;
@@ -295,19 +298,11 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
                 const identitySessionVerified = event.data.object as any;
                 logger.info(`✅ Identity Verification Session verified: ${identitySessionVerified.id}`);
 
-                if (identitySessionVerified.metadata?.userId) {
-                    await db.collection('users').doc(identitySessionVerified.metadata.userId).update({
-                        identityVerified: true,
-                        identityVerificationStatus: 'verified',
-                        identityDocumentStatus: 'verified',
-                        updatedAt: FieldValue.serverTimestamp(),
-                    });
-
-                    await db.collection('verifications').doc(identitySessionVerified.id).update({
-                        status: 'verified',
-                        updatedAt: FieldValue.serverTimestamp(),
-                    });
-                }
+                // Delegate to service which handles:
+                //   1. Name match check (form name vs Stripe verified_outputs)
+                //   2. Duplicate-person detection (SHA-256 fingerprint of name + DOB)
+                //   3. Final Firestore status write
+                await identityService.validateAndFinalizeVerification(identitySessionVerified);
                 break;
 
             case 'identity.verification_session.requires_input':
