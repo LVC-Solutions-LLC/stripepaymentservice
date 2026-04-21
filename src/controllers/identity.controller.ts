@@ -11,19 +11,24 @@ export const createIdentitySessionSchema = z.object({
         role: z.enum(['job_seeker', 'student_job_seeker', 'recruiter', 'jobseeker', 'studentjobseeker', 'company', 'admin', 'user', 'super_admin', 'university']),
         returnUrl: z.string().url(),
         stripeMode: z.enum(['test', 'live']).optional(),
+        // Optional form name fields for name-match validation after identity check
+        firstName: z.string().min(1).optional(),
+        lastName: z.string().min(1).optional(),
     }),
 });
 
 export const createIdentitySession = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const { userId, email, role, returnUrl, stripeMode } = req.body;
-        // Signature: (userId: string, email: string, role: string, returnUrl?: string, stripeMode?: 'test' | 'live')
+        const { userId, email, role, returnUrl, stripeMode, firstName, lastName } = req.body;
+
         const result = await identityService.createVerificationSession(
             userId as string,
             email as string,
             role as string,
             returnUrl as string,
-            stripeMode as 'test' | 'live'
+            stripeMode as 'test' | 'live',
+            firstName as string | undefined,
+            lastName as string | undefined,
         );
 
         res.status(200).json(result);
@@ -45,7 +50,6 @@ export const getIdentitySession = async (req: Request, res: Response, next: Next
 
         console.log(`[POLL_REQUEST] Session: ${sessionId}, UserID: ${userId}, Mode: ${stripeMode || 'default'}`);
 
-        // Signature: (sessionId: string, stripeMode?: 'test' | 'live', requestedUserId?: string)
         const session = await identityService.getVerificationSession(
             sessionId as string,
             stripeMode as 'test' | 'live',

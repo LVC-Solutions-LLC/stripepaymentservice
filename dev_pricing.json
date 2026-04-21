@@ -1,0 +1,685 @@
+{
+  "updatedBy": "omJAq4Q7KChgvSf4AkfIlV8vOuq2",
+  "updatedAt": {
+    "_seconds": 1776056256,
+    "_nanoseconds": 781000000
+  },
+  "oneTime": {
+    "job_seeker": {
+      "india": {
+        "max": 49900,
+        "price_inr": 4990000,
+        "price_usd": 0,
+        "currency": "INR",
+        "symbol": "₹",
+        "benefits": [
+          "Verified badge on your profile",
+          "Priority visibility to recruiters",
+          "Access to premium job listings",
+          "One-time KYC verification included",
+          "Trust score boost across the platform"
+        ],
+        "stripeProductId": "prod_UKH1L3OuYP3lUu",
+        "stripePriceId_inr": "price_1TLcTOG7HDya9H68BF0RThuY"
+      },
+      "global": {
+        "max": 1000,
+        "price_inr": 0,
+        "price_usd": 100000,
+        "currency": "USD",
+        "symbol": "$",
+        "benefits": [
+          "Verified badge on your profile",
+          "Priority visibility to recruiters",
+          "Access to premium job listings",
+          "One-time KYC verification included",
+          "Trust score boost across the platform"
+        ],
+        "stripeProductId": "prod_UKH1L3OuYP3lUu",
+        "stripePriceId_usd": "price_1TLcTOG7HDya9H68gLeusGkd"
+      },
+      "seats": 0,
+      "maxActiveJobs": 0,
+      "stripeProductId": "prod_UKH1L3OuYP3lUu",
+      "stripePriceId_inr": "price_1TLqERG7HDya9H685ZKE3yOB",
+      "stripePriceId_usd": "price_1TLqESG7HDya9H68Rz6nm44h"
+    },
+    "student_job_seeker": {
+      "india": {
+        "max": 19900,
+        "price_inr": 1990000,
+        "price_usd": 0,
+        "currency": "INR",
+        "symbol": "₹",
+        "benefits": [
+          "Student-verified badge on your profile",
+          "Access to campus & internship listings",
+          "Discounted one-time verification fee",
+          "Eligibility for student-exclusive opportunities",
+          "Trust score activation"
+        ],
+        "stripeProductId": "prod_UKH1toxBbQbMma",
+        "stripePriceId_inr": "price_1TLcTLG7HDya9H68F79siEcx"
+      },
+      "global": {
+        "max": 500,
+        "price_inr": 0,
+        "price_usd": 50000,
+        "currency": "USD",
+        "symbol": "$",
+        "benefits": [
+          "Student-verified badge on your profile",
+          "Access to campus & internship listings",
+          "Discounted one-time verification fee",
+          "Eligibility for student-exclusive opportunities",
+          "Trust score activation"
+        ],
+        "stripeProductId": "prod_UKH1toxBbQbMma",
+        "stripePriceId_usd": "price_1TLcTMG7HDya9H68VGs9jFic"
+      },
+      "seats": 0,
+      "maxActiveJobs": 0,
+      "stripeProductId": "prod_UKH1toxBbQbMma",
+      "stripePriceId_inr": "price_1TLqEWG7HDya9H68z8X8Q146",
+      "stripePriceId_usd": "price_1TLqEXG7HDya9H68tCuZ83j9"
+    },
+    "recruiter": {
+      "india": {
+        "max": 199900,
+        "price_inr": 19990000,
+        "price_usd": 0,
+        "currency": "INR",
+        "symbol": "₹",
+        "benefits": [
+          "Recruiter-verified badge",
+          "Post up to 10 active job listings",
+          "Access to verified candidate pool",
+          "AI-assisted candidate matching",
+          "Priority listing placement"
+        ],
+        "stripeProductId": "prod_UKH1ekcqwSCOp7",
+        "stripePriceId_inr": "price_1TLcTQG7HDya9H68uhzQZNKY"
+      },
+      "global": {
+        "max": 4900,
+        "price_inr": 0,
+        "price_usd": 490000,
+        "currency": "USD",
+        "symbol": "$",
+        "benefits": [
+          "Recruiter-verified badge",
+          "Post up to 10 active job listings",
+          "Access to verified candidate pool",
+          "AI-assisted candidate matching",
+          "Priority listing placement"
+        ],
+        "stripeProductId": "prod_UKH1ekcqwSCOp7",
+        "stripePriceId_usd": "price_1TLcTQG7HDya9H68aE8CysHg"
+      },
+      "seats": 0,
+      "maxActiveJobs": 0,
+      "stripeProductId": "prod_UKH1ekcqwSCOp7",
+      "stripePriceId_inr": "price_1TLqEaG7HDya9H68gTGhuSeA",
+      "stripePriceId_usd": "price_1TLqEbG7HDya9H68UR35obxM"
+    },
+    "company": {
+      "india": {
+        "max": 499900,
+        "price_inr": 49990000,
+        "price_usd": 0,
+        "currency": "INR",
+        "symbol": "₹",
+        "benefits": [
+          "Company-verified seal on all listings",
+          "Unlimited job postings during review period",
+          "Access to the full candidate marketplace",
+          "Fraud protection and compliance check",
+          "Priority support from verification team"
+        ],
+        "stripeProductId": "prod_UKH1ZQ6j7QQ84t",
+        "stripePriceId_inr": "price_1TLcTSG7HDya9H68J5ZwhjW9"
+      },
+      "global": {
+        "max": 14900,
+        "price_inr": 0,
+        "price_usd": 1490000,
+        "currency": "USD",
+        "symbol": "$",
+        "benefits": [
+          "Company-verified seal on all listings",
+          "Unlimited job postings during review period",
+          "Access to the full candidate marketplace",
+          "Fraud protection and compliance check",
+          "Priority support from verification team"
+        ],
+        "stripeProductId": "prod_UKH1ZQ6j7QQ84t",
+        "stripePriceId_usd": "price_1TLcTTG7HDya9H680y3wWnkh"
+      },
+      "seats": 0,
+      "maxActiveJobs": 0,
+      "stripeProductId": "prod_UKH1ZQ6j7QQ84t",
+      "stripePriceId_inr": "price_1TLqEeG7HDya9H68Lo6meZFm",
+      "stripePriceId_usd": "price_1TLqEfG7HDya9H68mOch7i77"
+    },
+    "university": {
+      "india": {
+        "max": 19999,
+        "currency": "INR",
+        "symbol": "₹",
+        "benefits": [
+          "University-verified institution badge",
+          "Dedicated campus recruitment portal",
+          "Access to all student & alumni profiles",
+          "Partnership co-branding on the platform",
+          "Compliance and accreditation review included"
+        ]
+      },
+      "global": {
+        "max": 499,
+        "currency": "USD",
+        "symbol": "$",
+        "benefits": [
+          "University-verified institution badge",
+          "Dedicated campus recruitment portal",
+          "Access to all student & alumni profiles",
+          "Partnership co-branding on the platform",
+          "Compliance and accreditation review included"
+        ]
+      },
+      "stripePriceId_inr": "price_1TLqEiG7HDya9H68J46E1DrZ",
+      "stripeProductId": "prod_UKVFmxtZzPRQpD",
+      "stripePriceId_usd": "price_1TLqEiG7HDya9H681uNoVNdR"
+    },
+    "sales_champion": {
+      "india": {
+        "max": 4999,
+        "currency": "INR",
+        "symbol": "₹",
+        "benefits": [
+          "Sales Champion verified badge",
+          "Access to referral commission dashboard",
+          "Priority lead assignment",
+          "Dedicated onboarding support",
+          "Performance-based tier upgrades"
+        ]
+      },
+      "global": {
+        "max": 129,
+        "currency": "USD",
+        "symbol": "$",
+        "benefits": [
+          "Sales Champion verified badge",
+          "Access to referral commission dashboard",
+          "Priority lead assignment",
+          "Dedicated onboarding support",
+          "Performance-based tier upgrades"
+        ]
+      },
+      "stripePriceId_inr": "price_1TLqElG7HDya9H68iuGXYC7L",
+      "stripeProductId": "prod_UKVFITlwPqD6Ce",
+      "stripePriceId_usd": "price_1TLqEmG7HDya9H685gFjBpgj"
+    }
+  },
+  "addons": {
+    "employment_verification": {
+      "india": {
+        "max": 1999,
+        "price_inr": 199900,
+        "price_usd": 0,
+        "currency": "INR",
+        "symbol": "₹",
+        "stripeProductId": "",
+        "stripePriceId_inr": ""
+      },
+      "global": {
+        "max": 49,
+        "price_inr": 0,
+        "price_usd": 4900,
+        "currency": "USD",
+        "symbol": "$",
+        "stripeProductId": "",
+        "stripePriceId_usd": ""
+      },
+      "allowedRoles": [
+        "job_seeker",
+        "student_job_seeker"
+      ],
+      "benefits": [
+        "Verified employment history record",
+        "Powered by Truework / The Work Number",
+        "Instant digital certificate",
+        "Accepted by top employers worldwide"
+      ],
+      "stripeProductId": "prod_UKU8OY1aj2OD4q",
+      "stripePriceId_inr": "price_1TLqFfG7HDya9H68RMqkVfri",
+      "stripePriceId_usd": "price_1TLqFgG7HDya9H68bjzLIOqC"
+    },
+    "profile_boost": {
+      "india": {
+        "max": 399,
+        "price_inr": 39900,
+        "price_usd": 0,
+        "currency": "INR",
+        "symbol": "₹",
+        "stripeProductId": "",
+        "stripePriceId_inr": ""
+      },
+      "global": {
+        "max": 10,
+        "price_inr": 0,
+        "price_usd": 1000,
+        "currency": "USD",
+        "symbol": "$",
+        "stripeProductId": "",
+        "stripePriceId_usd": ""
+      },
+      "allowedRoles": [
+        "job_seeker",
+        "student_job_seeker"
+      ],
+      "benefits": [
+        "7-day profile spotlight in recruiter searches",
+        "3× visibility boost on job applications",
+        "Featured badge during boost period",
+        "Performance report at end of boost"
+      ],
+      "stripeProductId": "prod_UKU83mRwn3gBA8",
+      "stripePriceId_inr": "price_1TLqFjG7HDya9H68UanH4JZ7",
+      "stripePriceId_usd": "price_1TLqFkG7HDya9H68aVU45GqS"
+    },
+    "extra_recruiter_seat": {
+      "india": {
+        "max": 5000,
+        "price_inr": 500000,
+        "price_usd": 0,
+        "currency": "INR",
+        "symbol": "₹",
+        "stripeProductId": "",
+        "stripePriceId_inr": ""
+      },
+      "global": {
+        "max": 60,
+        "price_inr": 0,
+        "price_usd": 6000,
+        "currency": "USD",
+        "symbol": "$",
+        "stripeProductId": "",
+        "stripePriceId_usd": ""
+      },
+      "allowedRoles": [
+        "company",
+        "recruiter"
+      ],
+      "benefits": [
+        "Add one additional recruiter seat to your team",
+        "Full access for new team members",
+        "Shared candidate pipeline view",
+        "One-time per seat purchase"
+      ],
+      "stripeProductId": "prod_UKU7BCdPmsaeta",
+      "stripePriceId_inr": "price_1TLqFoG7HDya9H68ZzoSbA0R",
+      "stripePriceId_usd": "price_1TLqFpG7HDya9H68rZRUqpBa"
+    },
+    "extra_job_posting": {
+      "india": {
+        "max": 2500,
+        "price_inr": 250000,
+        "price_usd": 0,
+        "currency": "INR",
+        "symbol": "₹",
+        "stripeProductId": "",
+        "stripePriceId_inr": ""
+      },
+      "global": {
+        "max": 30,
+        "price_inr": 0,
+        "price_usd": 3000,
+        "currency": "USD",
+        "symbol": "$",
+        "stripeProductId": "",
+        "stripePriceId_usd": ""
+      },
+      "allowedRoles": [
+        "company",
+        "recruiter"
+      ],
+      "benefits": [
+        "Post one additional active job listing",
+        "Standard 30-day posting duration",
+        "Full applicant management features",
+        "One-time per posting purchase"
+      ],
+      "stripeProductId": "prod_UKU8pWewPXbpNF",
+      "stripePriceId_inr": "price_1TLqFsG7HDya9H687P2XeFxt",
+      "stripePriceId_usd": "price_1TLqFtG7HDya9H68VSZvEF8o"
+    }
+  },
+  "subscriptions": {
+    "company": {
+      "showUpgradeButton": true,
+      "1_seat": {
+        "india": {
+          "max": 499900,
+          "price_inr": 49990000,
+          "price_usd": 0,
+          "benefits": [
+            "1 Recruiter seat",
+            "Unlimited job postings",
+            "Active candidate search",
+            "Company overview page"
+          ],
+          "stripeProductId": "prod_UKH1T3IM7C8O2M",
+          "stripePriceId_inr": "price_1TLcTGG7HDya9H68l5I7aBCH"
+        },
+        "global": {
+          "max": 5900,
+          "price_inr": 0,
+          "price_usd": 590000,
+          "benefits": [
+            "1 Recruiter seat",
+            "Unlimited job postings",
+            "Active candidate search",
+            "Company overview page"
+          ],
+          "stripeProductId": "prod_UKH1T3IM7C8O2M",
+          "stripePriceId_usd": "price_1TLcTHG7HDya9H68OVqelUsi"
+        },
+        "seats": 1,
+        "maxActiveJobs": 0,
+        "stripeProductId": "prod_UKH1T3IM7C8O2M",
+        "stripePriceId_inr": "price_1TLqF1G7HDya9H68aothMxW6",
+        "stripePriceId_usd": "price_1TLqF2G7HDya9H688Fihip27"
+      },
+      "2_seats": {
+        "india": 18000,
+        "global": 349,
+        "seats": 2,
+        "benefits": [
+          "2 active recruiter seats",
+          "Post up to 12 job listings",
+          "Candidate search & shortlisting",
+          "Team collaboration tools",
+          "Standard analytics"
+        ],
+        "stripePriceId_inr": "price_1TLqF4G7HDya9H68nrgXHF8y",
+        "stripeProductId": "prod_UKVFzx8Cp31Gkz",
+        "stripePriceId_usd": "price_1TLqF5G7HDya9H689q6dT6mP"
+      },
+      "5_seats": {
+        "india": {
+          "max": 1999900,
+          "price_inr": 199990000,
+          "price_usd": 0,
+          "benefits": [
+            "5 Recruiter seats (Team sharing)",
+            "Priority job listings",
+            "Advanced candidate filtering",
+            "Analytics dashboard"
+          ],
+          "stripeProductId": "prod_UKH10D2pPaj4m0",
+          "stripePriceId_inr": "price_1TLcTJG7HDya9H68zlNj6mxB"
+        },
+        "global": {
+          "max": 19900,
+          "price_inr": 0,
+          "price_usd": 1990000,
+          "benefits": [
+            "5 Recruiter seats (Team sharing)",
+            "Priority job listings",
+            "Advanced candidate filtering",
+            "Analytics dashboard"
+          ],
+          "stripeProductId": "prod_UKH10D2pPaj4m0",
+          "stripePriceId_usd": "price_1TLcTJG7HDya9H68ByaRymF6"
+        },
+        "seats": 5,
+        "maxActiveJobs": 0,
+        "stripeProductId": "prod_UKH10D2pPaj4m0",
+        "stripePriceId_inr": "price_1TLqF8G7HDya9H68jIvJnEo9",
+        "stripePriceId_usd": "price_1TLqF9G7HDya9H68A75ep6NQ"
+      },
+      "10_seats": {
+        "india": 75000,
+        "global": 1499,
+        "seats": 10,
+        "benefits": [
+          "10 active recruiter seats",
+          "Unlimited job postings",
+          "Full candidate marketplace access",
+          "ATS integration support",
+          "Advanced analytics & export",
+          "Dedicated account manager"
+        ],
+        "stripePriceId_inr": "price_1TLqFCG7HDya9H68srnOnqiC",
+        "stripeProductId": "prod_UKVF4lzJPfIJVP",
+        "stripePriceId_usd": "price_1TLqFCG7HDya9H68i3LxEUZG"
+      },
+      "25_seats": {
+        "india": 200000,
+        "global": 3999,
+        "seats": 25,
+        "benefits": [
+          "25 active recruiter seats",
+          "Unlimited job postings",
+          "Enterprise-grade candidate pipeline",
+          "Custom ATS & HRIS integration",
+          "SLA-backed support",
+          "Quarterly business reviews",
+          "Custom branding on listings"
+        ],
+        "stripePriceId_inr": "price_1TLqFFG7HDya9H68jKYyR7kK",
+        "stripeProductId": "prod_UKVF0h3VNNmZ1y",
+        "stripePriceId_usd": "price_1TLqFFG7HDya9H68SvQLxA9b"
+      }
+    },
+    "sales_champion": {
+      "showUpgradeButton": true,
+      "tier_1": {
+        "india": 1500,
+        "global": 29,
+        "benefits": [
+          "Up to 10 referral leads per month",
+          "5% commission on successful placements",
+          "Basic referral tracking dashboard",
+          "Monthly performance report"
+        ],
+        "stripePriceId_inr": "price_1TLqFIG7HDya9H68QKHkKzra",
+        "stripeProductId": "prod_UKVF0nri31qyko",
+        "stripePriceId_usd": "price_1TLqFIG7HDya9H68748zG0yO"
+      },
+      "tier_2": {
+        "india": 4000,
+        "global": 79,
+        "benefits": [
+          "Up to 30 referral leads per month",
+          "8% commission on successful placements",
+          "Advanced referral tracking dashboard",
+          "Bi-weekly performance coaching",
+          "Priority lead queue"
+        ],
+        "stripePriceId_inr": "price_1TLqFLG7HDya9H68gwvjFbCF",
+        "stripeProductId": "prod_UKVFGjkGSP8i0O",
+        "stripePriceId_usd": "price_1TLqFMG7HDya9H68h7sQtgOw"
+      },
+      "tier_3": {
+        "india": 7500,
+        "global": 149,
+        "benefits": [
+          "Up to 75 referral leads per month",
+          "12% commission on successful placements",
+          "Full CRM-style lead management",
+          "Weekly coaching calls",
+          "Dedicated referral portal",
+          "Bonus incentives on milestones"
+        ],
+        "stripePriceId_inr": "price_1TLqFOG7HDya9H683C3GBHTM",
+        "stripeProductId": "prod_UKVFpgtOByl7Vo",
+        "stripePriceId_usd": "price_1TLqFPG7HDya9H68jMhX29bo"
+      },
+      "tier_4": {
+        "india": 15000,
+        "global": 299,
+        "benefits": [
+          "Unlimited referral leads",
+          "15% commission on successful placements",
+          "Enterprise lead management suite",
+          "Personal success manager",
+          "Top-tier performance bonuses",
+          "Early access to new platform features",
+          "Co-branded marketing materials"
+        ],
+        "stripePriceId_inr": "price_1TLqFRG7HDya9H68SPNM1aXE",
+        "stripeProductId": "prod_UKVFUAlxhTMF9c",
+        "stripePriceId_usd": "price_1TLqFSG7HDya9H68nPlA7vNn"
+      }
+    },
+    "layoff_mode": {
+      "lite": {
+        "india": 750,
+        "global": 15,
+        "benefits": [
+          "Layoff support profile badge",
+          "Access to layoff-friendly job listings",
+          "Basic resume review",
+          "Community forum access"
+        ],
+        "stripePriceId_inr": "price_1TLqFVG7HDya9H68QSj31xRC",
+        "stripeProductId": "prod_UKVGUh9tehXLgW",
+        "stripePriceId_usd": "price_1TLqFVG7HDya9H68tKJlesAq"
+      },
+      "plus": {
+        "india": 2000,
+        "global": 39,
+        "benefits": [
+          "Layoff support profile badge",
+          "Priority placement in layoff job pool",
+          "1 professional resume rewrite per month",
+          "Career counsellor session (30 min)",
+          "LinkedIn profile tips"
+        ],
+        "stripePriceId_inr": "price_1TLqFYG7HDya9H68ZSMC9M9F",
+        "stripeProductId": "prod_UKVGGWv3C20ciy",
+        "stripePriceId_usd": "price_1TLqFYG7HDya9H680PA2HE6w"
+      },
+      "max": {
+        "india": 4000,
+        "global": 79,
+        "benefits": [
+          "Layoff support profile badge",
+          "Top-priority job matching",
+          "Unlimited resume revisions",
+          "Weekly 1-on-1 career coaching",
+          "Interview prep & mock sessions",
+          "Networking introductions to hiring managers",
+          "Mental wellness resources & community"
+        ],
+        "stripePriceId_inr": "price_1TLqFbG7HDya9H68O0NzG2jy",
+        "stripeProductId": "prod_UKVGuAoDOo7iBZ",
+        "stripePriceId_usd": "price_1TLqFbG7HDya9H68D3C13Cwx"
+      }
+    },
+    "job_seeker": {
+      "showUpgradeButton": true,
+      "basic": {
+        "india": {
+          "max": 399,
+          "price_inr": 39900,
+          "price_usd": 0,
+          "benefits": [
+            "Standard profile visibility",
+            "Apply to 3 jobs/month",
+            "Job alerts"
+          ],
+          "stripeProductId": "prod_UKH18Ao6FEvywz",
+          "stripePriceId_inr": ""
+        },
+        "global": {
+          "max": 9,
+          "price_inr": 0,
+          "price_usd": 900,
+          "benefits": [
+            "Standard profile visibility",
+            "Apply to 3 jobs/month",
+            "Job alerts"
+          ],
+          "stripeProductId": "prod_UKH18Ao6FEvywz",
+          "stripePriceId_usd": ""
+        },
+        "seats": 0,
+        "maxActiveJobs": 0,
+        "stripeProductId": "prod_UKH18Ao6FEvywz",
+        "stripePriceId_inr": "price_1TLqEoG7HDya9H683zOS4IHB",
+        "stripePriceId_usd": "price_1TLqEpG7HDya9H68cIQz9o0l"
+      },
+      "standard": {
+        "india": {
+          "max": 49900,
+          "price_inr": 4990000,
+          "price_usd": 0,
+          "benefits": [
+            "Profile featured to recruiters",
+            "Unlimited job applications",
+            "AI Resume optimization prompts",
+            "Advanced job filters"
+          ],
+          "stripeProductId": "prod_UKH19PXqWb5Txl",
+          "stripePriceId_inr": "price_1TLcTCG7HDya9H68GLQNiSED"
+        },
+        "global": {
+          "max": 1000,
+          "price_inr": 0,
+          "price_usd": 100000,
+          "benefits": [
+            "Profile featured to recruiters",
+            "Unlimited job applications",
+            "AI Resume optimization prompts",
+            "Advanced job filters"
+          ],
+          "stripeProductId": "prod_UKH19PXqWb5Txl",
+          "stripePriceId_usd": "price_1TLcTCG7HDya9H68QO03Zh6Q"
+        },
+        "seats": 0,
+        "maxActiveJobs": 0,
+        "stripeProductId": "prod_UKH19PXqWb5Txl",
+        "stripePriceId_inr": "price_1TLqEsG7HDya9H68gLxRkHm4",
+        "stripePriceId_usd": "price_1TLqEtG7HDya9H68yJ2DU0Ms"
+      },
+      "premium": {
+        "india": {
+          "max": 99900,
+          "price_inr": 9990000,
+          "price_usd": 0,
+          "benefits": [
+            "Premium profile badge",
+            "Direct messaging to companies",
+            "Salary insights for listing",
+            "Incognito mode browsing"
+          ],
+          "stripeProductId": "prod_UKH10d9rE71XAf",
+          "stripePriceId_inr": "price_1TLcTEG7HDya9H68bbu7v5yv"
+        },
+        "global": {
+          "max": 2000,
+          "price_inr": 0,
+          "price_usd": 200000,
+          "benefits": [
+            "Premium profile badge",
+            "Direct messaging to companies",
+            "Salary insights for listing",
+            "Incognito mode browsing"
+          ],
+          "stripeProductId": "prod_UKH10d9rE71XAf",
+          "stripePriceId_usd": "price_1TLcTFG7HDya9H68nGKL8a94"
+        },
+        "seats": 0,
+        "maxActiveJobs": 0,
+        "stripeProductId": "prod_UKH10d9rE71XAf",
+        "stripePriceId_inr": "price_1TLqEwG7HDya9H68lZvlzll9",
+        "stripePriceId_usd": "price_1TLqExG7HDya9H68F0lcw7WB"
+      },
+      "layoff_lite": {
+        "stripeProductId": "prod_UK5E9uYSlPzZzN"
+      }
+    }
+  }
+}

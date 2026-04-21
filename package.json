@@ -5,8 +5,13 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "tsc",
-    "start": "node dist/server.js",
     "dev": "nodemon src/server.ts",
+    "dev:dev": "env-cmd -f .env.dev nodemon src/server.ts",
+    "dev:qa": "env-cmd -f .env.qa nodemon src/server.ts",
+    "start": "node dist/server.js",
+    "start:dev": "env-cmd -f .env.dev node dist/server.js",
+    "start:qa": "env-cmd -f .env.qa node dist/server.js",
+    "start:prod": "env-cmd -f .env.prod node dist/server.js",
     "seed:pricing": "ts-node scripts/seed-pricing.ts"
   },
   "keywords": [],
@@ -31,6 +36,7 @@
     "@types/stripe": "^8.0.416",
     "nodemon": "^3.1.11",
     "ts-node": "^10.9.2",
+    "env-cmd": "^10.1.0",
     "typescript": "^5.9.3"
   }
 }

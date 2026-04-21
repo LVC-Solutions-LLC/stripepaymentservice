@@ -45,3 +45,5 @@ const parseEnv = () => {
 };
 
 export const env = parseEnv();
+
+console.log(`🚀 [Payment Service] Configured for Project: ${env.FIREBASE_PROJECT_ID} on Port: ${env.PORT}`);
