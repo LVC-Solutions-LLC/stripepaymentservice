@@ -31,8 +31,8 @@ function namePartsMatch(a: string, b: string): boolean {
 
 /**
  * Build a SHA-256 fingerprint for a verified person based on
- * name + date of birth. This lets us detect the same physical
- * person across different accounts WITHOUT storing raw PII.
+ * name + date of birth. This version detects name swaps (e.g. "First Last" vs "Last First")
+ * by sorting the name parts alphabetically.
  */
 function buildIdentityFingerprint(
     firstName: string,
@@ -40,7 +40,11 @@ function buildIdentityFingerprint(
     dob: { day: number; month: number; year: number } | null | undefined
 ): string {
     const dobStr = dob ? `${dob.year}-${String(dob.month).padStart(2, '0')}-${String(dob.day).padStart(2, '0')}` : 'unknown';
-    const raw = `${normaliseName(firstName)}|${normaliseName(lastName)}|${dobStr}`;
+    
+    // Sort name parts alphabetically to handle swaps
+    const normalisedParts = [normaliseName(firstName), normaliseName(lastName)].filter(Boolean).sort();
+    const raw = `${normalisedParts.join('|')}|${dobStr}`;
+    
     return crypto.createHash('sha256').update(raw).digest('hex');
 }
 
@@ -141,29 +145,32 @@ export class IdentityService {
         if (userId) {
             const status = session.status;
 
-            const dbStatus = status === 'verified' ? 'verified' :
-                status === 'requires_input' ? 'requires_input' :
-                    status === 'processing' ? 'processing' :
-                        status === 'canceled' ? 'failed' : status;
+            // If the session is verified, we MUST run the validation logic (Duplicate check, name match)
+            // This prevents the "polling loophole".
+            if (status === 'verified') {
+                console.log(`[SYNC] Session ${sessionId} is VERIFIED on Stripe. Running validation logic...`);
+                await this.internalValidateUserIdentity(session);
+                // The internal method handles database updates for users/verifications
+            } else {
+                const dbStatus = status === 'requires_input' ? 'requires_input' :
+                                status === 'processing' ? 'processing' :
+                                status === 'canceled' ? 'failed' : status;
 
-            console.log(`[SYNC] Updating Firestore for user ${userId}. New status: ${dbStatus}`);
+                console.log(`[SYNC] Updating Firestore for user ${userId}. New status: ${dbStatus}`);
 
-            const userUpdate = await db.collection('users').doc(userId).update({
-                identityVerificationStatus: dbStatus,
-                identityDocumentStatus: dbStatus,
-                updatedAt: FieldValue.serverTimestamp(),
-            });
+                await db.collection('users').doc(userId).update({
+                    identityVerificationStatus: dbStatus,
+                    identityDocumentStatus: dbStatus,
+                    updatedAt: FieldValue.serverTimestamp(),
+                });
 
-            console.log(`[SYNC] User document updated at: ${userUpdate.writeTime.toDate().toISOString()}`);
-
-            const verificationUpdate = await db.collection('verifications').doc(sessionId).set({
-                userId,
-                status: status,
-                lastError: session.last_error || null,
-                updatedAt: FieldValue.serverTimestamp(),
-            }, { merge: true });
-
-            console.log(`[SYNC] Verification record updated at: ${verificationUpdate.writeTime.toDate().toISOString()}`);
+                await db.collection('verifications').doc(sessionId).set({
+                    userId,
+                    status: status,
+                    lastError: session.last_error || null,
+                    updatedAt: FieldValue.serverTimestamp(),
+                }, { merge: true });
+            }
         }
 
         return session;
@@ -202,206 +209,160 @@ export class IdentityService {
     }
 
     /**
-     * Called by the webhook when a verification session is marked `verified`.
-     * Performs two checks:
-     *   1. Name match — compares Stripe's extracted name against the form name.
-     *   2. Duplicate person — checks whether this physical identity has already
-     *      been verified under a different userId.
-     *
-     * Writes the final status back to Firestore accordingly.
+     * Entry point for Stripe Webhooks.
      */
     async validateAndFinalizeVerification(
         session: any, // The full Stripe VerificationSession object from the webhook
     ): Promise<void> {
-        const userId: string | undefined =
-            session.metadata?.userId || session.client_reference_id;
+        await this.internalValidateUserIdentity(session);
+    }
+
+    /**
+     * UNIFIED VALIDATION LOGIC
+     * Performs Name Match, Duplicate Fingerprint Search, and Name Repetition checks.
+     * Transitions cases to 'verified', 'under_review', 'name_mismatch', or 'duplicate_person'.
+     */
+    private async internalValidateUserIdentity(session: any): Promise<void> {
+        const sessionId = session.id;
+        const userId: string | undefined = session.metadata?.userId || session.client_reference_id;
 
         if (!userId) {
-            console.warn(`[FINALIZE] No userId found on session ${session.id}. Skipping validation.`);
+            console.warn(`[VALIDATE] No userId found on session ${sessionId}. Skipping.`);
             return;
         }
 
-        // -----------------------------------------------------------------------
+        // Check if we already finalised this session to avoid double-processing
+        const existingVer = await db.collection('verifications').doc(sessionId).get();
+        if (existingVer.exists && (existingVer.data()?.status === 'verified' || existingVer.data()?.status === 'under_review')) {
+            console.log(`[VALIDATE] Session ${sessionId} already processed. Skipping.`);
+            return;
+        }
+
         // 1. Extract verified outputs
-        // -----------------------------------------------------------------------
         const outputs = session.verified_outputs;
         const stripeFirstName: string = outputs?.first_name || '';
         const stripeLastName:  string = outputs?.last_name  || '';
         const stripeDob = outputs?.dob || null; // { day, month, year }
 
-        console.log(`[FINALIZE] Session ${session.id} verified for user ${userId}.`);
-        console.log(`[FINALIZE] Stripe name: "${stripeFirstName} ${stripeLastName}", DOB: ${JSON.stringify(stripeDob)}`);
-
-        // -----------------------------------------------------------------------
-        // 2. Retrieve the form name that was saved when the session was created
-        //    (stored in session metadata AND in the verifications Firestore doc)
-        // -----------------------------------------------------------------------
-        const formFirstName: string = session.metadata?.formFirstName || '';
-        const formLastName:  string = session.metadata?.formLastName  || '';
-
-        // Fall back to Firestore if metadata is missing
-        let resolvedFormFirst = formFirstName;
-        let resolvedFormLast  = formLastName;
+        // 2. Retrieve form name
+        let resolvedFormFirst = session.metadata?.formFirstName || '';
+        let resolvedFormLast  = session.metadata?.formLastName  || '';
 
         if (!resolvedFormFirst || !resolvedFormLast) {
-            const verDoc = await db.collection('verifications').doc(session.id).get();
-            if (verDoc.exists) {
-                const vd = verDoc.data()!;
-                resolvedFormFirst = resolvedFormFirst || vd.formFirstName || '';
-                resolvedFormLast  = resolvedFormLast  || vd.formLastName  || '';
+            if (existingVer.exists) {
+                resolvedFormFirst = existingVer.data()?.formFirstName || '';
+                resolvedFormLast  = existingVer.data()?.formLastName  || '';
+            }
+            if (!resolvedFormFirst || !resolvedFormLast) {
+                const userDoc = await db.collection('users').doc(userId).get();
+                if (userDoc.exists) {
+                    resolvedFormFirst = resolvedFormFirst || userDoc.data()?.firstName || '';
+                    resolvedFormLast  = resolvedFormLast  || userDoc.data()?.lastName  || '';
+                }
             }
         }
 
-        // If still missing, fall back to the users collection
-        if (!resolvedFormFirst || !resolvedFormLast) {
-            const userDoc = await db.collection('users').doc(userId).get();
-            if (userDoc.exists) {
-                const ud = userDoc.data()!;
-                resolvedFormFirst = resolvedFormFirst || ud.firstName || '';
-                resolvedFormLast  = resolvedFormLast  || ud.lastName  || '';
-            }
-        }
+        const suspiciousReasons: string[] = [];
+        let nameMatchStatus: 'matched' | 'mismatch' | 'unavailable' = 'matched';
 
-        console.log(`[FINALIZE] Form name: "${resolvedFormFirst} ${resolvedFormLast}"`);
-
-        // -----------------------------------------------------------------------
         // 3. Name match check
-        // -----------------------------------------------------------------------
-        let nameMatchStatus: 'matched' | 'mismatch' | 'unavailable';
-
-        if (!stripeFirstName && !stripeLastName) {
-            // Stripe didn't return a name — treat as unavailable (don't block)
-            nameMatchStatus = 'unavailable';
-            console.warn(`[FINALIZE] Stripe returned no name for session ${session.id}. Marking as unavailable.`);
-        } else {
+        if (stripeFirstName || stripeLastName) {
             const firstMatch = namePartsMatch(stripeFirstName, resolvedFormFirst);
             const lastMatch  = namePartsMatch(stripeLastName,  resolvedFormLast);
-
-            nameMatchStatus = (firstMatch && lastMatch) ? 'matched' : 'mismatch';
-            console.log(`[FINALIZE] Name match — first: ${firstMatch}, last: ${lastMatch} → ${nameMatchStatus}`);
+            
+            if (!firstMatch || !lastMatch) {
+                nameMatchStatus = 'mismatch';
+                suspiciousReasons.push('Name on Profile (Expected) vs Name on ID (Detected) mismatch');
+            }
+        } else {
+            nameMatchStatus = 'unavailable';
         }
 
-        // If there's a mismatch → block the user immediately
-        if (nameMatchStatus === 'mismatch') {
-            await db.collection('users').doc(userId).update({
-                identityVerificationStatus: 'name_mismatch',
-                identityDocumentStatus:     'name_mismatch',
-                nameMatchStatus,
-                stripeVerifiedFirstName: stripeFirstName,
-                stripeVerifiedLastName:  stripeLastName,
-                updatedAt: FieldValue.serverTimestamp(),
-            });
+        let existingFingerprintUserId = null;
 
-            await db.collection('verifications').doc(session.id).set({
-                status: 'name_mismatch',
-                nameMatchStatus,
-                validationDetails: {
-                    formFirstName: resolvedFormFirst,
-                    formLastName:  resolvedFormLast,
-                    stripeFirstName: stripeFirstName,
-                    stripeLastName:  stripeLastName,
-                },
-                updatedAt: FieldValue.serverTimestamp(),
-            }, { merge: true });
-
-            // Write an admin alert so the team can review
-            await db.collection('admin_alerts').add({
-                type: 'IDENTITY_NAME_MISMATCH',
-                userId,
-                sessionId: session.id,
-                formName: `${resolvedFormFirst} ${resolvedFormLast}`,
-                stripeName: `${stripeFirstName} ${stripeLastName}`,
-                createdAt: FieldValue.serverTimestamp(),
-            });
-
-            console.log(`[FINALIZE] ❌ Name mismatch for user ${userId}. Blocked.`);
-            return; // Stop — do not proceed to duplicate check
-        }
-
-        // -----------------------------------------------------------------------
-        // 4. Duplicate-person check
-        //    Build a fingerprint from name + DOB and check verified_identities
-        // -----------------------------------------------------------------------
+        // 4. Duplicate fingerprint check (Name + DOB)
         if (stripeFirstName && stripeLastName) {
             const fingerprint = buildIdentityFingerprint(stripeFirstName, stripeLastName, stripeDob);
-            console.log(`[FINALIZE] Identity fingerprint: ${fingerprint}`);
-
             const existingSnap = await db.collection('verified_identities').doc(fingerprint).get();
 
             if (existingSnap.exists) {
                 const existingData = existingSnap.data()!;
-
                 if (existingData.userId !== userId) {
-                    // Same person, different account → block
-                    console.warn(`[FINALIZE] 🚨 Duplicate identity detected! Existing user: ${existingData.userId}, new user: ${userId}`);
-
-                    await db.collection('users').doc(userId).update({
-                        identityVerificationStatus: 'duplicate_person',
-                        identityDocumentStatus:     'duplicate_person',
-                        nameMatchStatus,
-                        verificationBlockReason:    'An account with this identity has already been verified.',
-                        updatedAt: FieldValue.serverTimestamp(),
-                    });
-
-                    await db.collection('verifications').doc(session.id).set({
-                        status: 'duplicate_person',
-                        fingerprint,
-                        validationDetails: {
-                            existingUserId: existingData.userId,
-                            fingerprint,
-                        },
-                        updatedAt: FieldValue.serverTimestamp(),
-                    }, { merge: true });
-
-                    // Admin alert
-                    await db.collection('admin_alerts').add({
-                        type: 'IDENTITY_DUPLICATE_PERSON',
-                        newUserId: userId,
-                        existingUserId: existingData.userId,
-                        sessionId: session.id,
-                        fingerprint,
-                        createdAt: FieldValue.serverTimestamp(),
-                    });
-
-                    return; // Blocked
+                    existingFingerprintUserId = existingData.userId;
+                    suspiciousReasons.push(`Duplicate Profile: Identity SHA-256 fingerprint matches existing verified user ${existingData.userId}`);
                 }
+            }
 
-                // Same user re-verifying — update the record
-                console.log(`[FINALIZE] Same user ${userId} re-verified. Updating fingerprint record.`);
-                await db.collection('verified_identities').doc(fingerprint).update({
-                    sessionId: session.id,
-                    verifiedAt: FieldValue.serverTimestamp(),
-                });
-            } else {
-                // First time this identity is verified — store the fingerprint
+            // 5. Name Repetition Check (Search for same name + DOB in users collection)
+            // This catches people who might have been verified before fingerprinting was implemented.
+            const similarUsers = await db.collection('users')
+                .where('stripeVerifiedFirstName', '==', stripeFirstName)
+                .where('stripeVerifiedLastName', '==', stripeLastName)
+                .get();
+            
+            const duplicates = similarUsers.docs.filter(d => d.id !== userId);
+            if (duplicates.length > 0) {
+                suspiciousReasons.push(`Name Duplicate: ${duplicates.length} other accounts found with this exact name and verified identity.`);
+            }
+
+            // Record/Update the fingerprint if everything else seems okay OR if it's the same user re-verifying
+            if (suspiciousReasons.length === 0) {
                 await db.collection('verified_identities').doc(fingerprint).set({
                     userId,
-                    sessionId: session.id,
+                    sessionId,
                     verifiedAt: FieldValue.serverTimestamp(),
                 });
-                console.log(`[FINALIZE] ✅ New identity fingerprint stored for user ${userId}.`);
             }
         }
 
-        // -----------------------------------------------------------------------
-        // 5. All checks passed → mark as fully verified
-        // -----------------------------------------------------------------------
+        // 6. Determine final status
+        let finalStatus: string = 'verified';
+        if (suspiciousReasons.length > 0) {
+            // "Under Review" for suspicious cases
+            finalStatus = 'under_review';
+        }
+
+        console.log(`[VALIDATE] User ${userId} final validation status: ${finalStatus}. Reasons: ${suspiciousReasons.join(', ')}`);
+
+        // 7. Update User
         await db.collection('users').doc(userId).update({
-            identityVerified: true,
-            identityVerificationStatus: 'verified',
-            identityDocumentStatus:     'verified',
+            identityVerified: finalStatus === 'verified',
+            identityVerificationStatus: finalStatus,
+            identityDocumentStatus:     finalStatus,
             nameMatchStatus,
+            suspiciousReasons,
             stripeVerifiedFirstName: stripeFirstName,
             stripeVerifiedLastName:  stripeLastName,
             updatedAt: FieldValue.serverTimestamp(),
         });
 
-        await db.collection('verifications').doc(session.id).set({
-            status: 'verified',
+        // 8. Update Verification Record
+        await db.collection('verifications').doc(sessionId).set({
+            status: finalStatus,
             nameMatchStatus,
+            suspiciousReasons,
+            validationDetails: {
+                formFirstName: resolvedFormFirst,
+                formLastName:  resolvedFormLast,
+                stripeFirstName,
+                stripeLastName,
+                dob: stripeDob,
+                existingUserId: existingFingerprintUserId
+            },
             updatedAt: FieldValue.serverTimestamp(),
         }, { merge: true });
 
-        console.log(`[FINALIZE] ✅ User ${userId} fully verified.`);
+        // 9. Create Admin Alert if suspicious
+        if (suspiciousReasons.length > 0) {
+            await db.collection('admin_alerts').add({
+                type: 'IDENTITY_SUSPICIOUS_ACTIVITY',
+                userId,
+                sessionId,
+                reasons: suspiciousReasons,
+                createdAt: FieldValue.serverTimestamp(),
+            });
+        }
+
+        console.log(`[VALIDATE] ✅ User ${userId} final status: ${finalStatus}`);
     }
 }

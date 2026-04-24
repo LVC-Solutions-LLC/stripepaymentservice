@@ -243,7 +243,7 @@ export class SubscriptionService {
         return { status: canceledSub.status };
     }
 
-    async changeSubscription(userId: string, subscriptionId: string, newRole: string, newCountry: string, stripeMode?: 'test' | 'live') {
+    async changeSubscription(userId: string, subscriptionId: string, newRole: string, newCountry: string, stripeMode?: 'test' | 'live', promoCode?: string) {
         const stripe = getStripe(stripeMode);
         const subRef = db.collection('subscriptions').doc(subscriptionId);
         const subDoc = await subRef.get();
@@ -271,20 +271,66 @@ export class SubscriptionService {
         const stripeSub = await stripe.subscriptions.retrieve(subscriptionId);
         const itemId = stripeSub.items.data[0].id;
 
-        const updatedSub = await stripe.subscriptions.update(subscriptionId, {
+        const updateParams: any = {
             items: [{
                 id: itemId,
                 price: (newCountry === 'IN' ? pricingData.stripePriceId_inr : pricingData.stripePriceId_usd) || undefined,
                 price_data: (newCountry === 'IN' ? pricingData.stripePriceId_inr : pricingData.stripePriceId_usd) ? undefined : {
                     currency: currency,
                     product: productId,
-                    unit_amount: amount * 100,
+                    unit_amount: (typeof amount === 'number' ? amount : (amount.price_inr || amount.price_usd || 0)),
                     recurring: { interval: 'month' },
                 } as any,
             }],
             proration_behavior: 'always_invoice',
-        });
+        };
+
+        if (promoCode) {
+             // Look up promotion code ID
+             const promoCodes = await stripe.promotionCodes.list({ code: promoCode.toUpperCase(), active: true, limit: 1 });
+             if (promoCodes.data.length > 0) {
+                 updateParams.discounts = [{ promotion_code: promoCodes.data[0].id }];
+             } else {
+                 throw new AppError(`Invalid or inactive promotion code: ${promoCode}`, 400);
+             }
+        }
+
+        const updatedSub = await stripe.subscriptions.update(subscriptionId, updateParams);
 
         return updatedSub;
+    }
+
+    async applyCouponToSubscription(userId: string, subscriptionId: string, promoCode: string, stripeMode?: 'test' | 'live') {
+        const stripe = getStripe(stripeMode);
+        
+        // 1. Verify subscription belongs to user
+        const subDoc = await db.collection('subscriptions').doc(subscriptionId).get();
+        if (!subDoc.exists || subDoc.data()?.userId !== userId) {
+            throw new AppError('Subscription not found or access denied', 404);
+        }
+
+        // 2. Resolve Promo Code to PromotionCode ID
+        const promoCodes = await stripe.promotionCodes.list({
+            code: promoCode.toUpperCase(),
+            active: true,
+            limit: 1
+        });
+
+        if (promoCodes.data.length === 0) {
+            throw new AppError(`Invalid or inactive promotion code: ${promoCode}`, 400);
+        }
+
+        const promoCodeId = promoCodes.data[0].id;
+
+        // 3. Apply to Subscription
+        const updatedSub = await stripe.subscriptions.update(subscriptionId, {
+            discounts: [{ promotion_code: promoCodeId }]
+        });
+
+        return {
+            status: 'success',
+            subscriptionId: updatedSub.id,
+            discount: promoCode
+        };
     }
 }

@@ -350,6 +350,10 @@ export class PaymentService {
                     },
                 });
             } else {
+                console.error(`❌ [PaymentService] Stripe Create Session Failed:`, err);
+                if (err.raw) {
+                    console.error(`🔍 [Stripe Raw Error]:`, JSON.stringify(err.raw, null, 2));
+                }
                 throw err;
             }
         }

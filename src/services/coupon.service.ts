@@ -115,7 +115,7 @@ export class CouponService {
         }
 
         if (duration === 'repeating') {
-            couponParams.duration_months = durationMonths;
+            couponParams.duration_in_months = durationMonths;
         }
 
         if (maxRedemptions) {
@@ -223,7 +223,7 @@ export class CouponService {
                 value: coupon.percent_off || coupon.amount_off || 0,
                 currency: coupon.currency,
                 duration: coupon.duration,
-                durationMonths: coupon.duration_months,
+                durationMonths: coupon.duration_in_months,
                 maxRedemptions: promo.max_redemptions || coupon.max_redemptions,
                 expiresAt: coupon.redeem_by ? new Date(coupon.redeem_by * 1000).toISOString() : undefined,
                 appliesTo: {

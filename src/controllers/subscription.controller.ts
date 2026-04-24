@@ -40,10 +40,21 @@ export const cancelSubscription = async (req: Request, res: Response, next: Next
 export const updateSubscription = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { id } = req.params as { id: string };
-        const { userId, role, country, stripeMode } = req.body;
-        const result = await subscriptionService.changeSubscription(userId, id, role, country, stripeMode);
-        res.status(200).json(result);
+        const { userId, role, country, stripeMode, promoCode } = req.body;
+        const result = await subscriptionService.changeSubscription(userId, id, role, country, stripeMode, promoCode);
+        res.status(200).json({ status: "success", data: result });
     } catch (err) {
         next(err);
     }
-}
+};
+
+export const applyCoupon = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { id } = req.params as { id: string }; // Subscription ID
+        const { userId, promoCode, stripeMode } = req.body;
+        const result = await subscriptionService.applyCouponToSubscription(userId, id, promoCode, stripeMode);
+        res.status(200).json({ status: "success", data: result });
+    } catch (err) {
+        next(err);
+    }
+};
