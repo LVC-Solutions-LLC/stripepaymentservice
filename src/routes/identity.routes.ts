@@ -1,4 +1,4 @@
-// Identity routes registration
+
 import { Router } from 'express';
 import {
     createIdentitySession,
