@@ -19,8 +19,8 @@ router.post('/verify-session', verifySession);
 
 router.get('/config', (req: Request, res: Response) => {
     const publishableKey = env.STRIPE_MODE === 'live'
-        ? (env.STRIPE_LIVE_PUBLISHABLE_KEY || env.STRIPE_PUBLISHABLE_KEY)
-        : (env.STRIPE_TEST_PUBLISHABLE_KEY || env.STRIPE_PUBLISHABLE_KEY);
+        ? env.STRIPE_LIVE_PUBLISHABLE_KEY
+        : env.STRIPE_TEST_PUBLISHABLE_KEY;
 
     res.status(200).json({
         status: 'success',

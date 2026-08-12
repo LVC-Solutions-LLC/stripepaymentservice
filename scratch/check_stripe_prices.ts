@@ -5,12 +5,13 @@ import * as admin from 'firebase-admin';
 
 dotenv.config();
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+const secretKey = (process.env.STRIPE_TEST_SECRET_KEY || process.env.STRIPE_LIVE_SECRET_KEY)!;
+const stripe = new Stripe(secretKey, {
     apiVersion: '2023-10-16' as any,
 });
 
 async function checkPrices() {
-    console.log("Using Stripe Secret Key starting with:", process.env.STRIPE_SECRET_KEY!.substring(0, 15));
+    console.log("Using Stripe Secret Key starting with:", secretKey.substring(0, 15));
     
     const productId = "prod_UKpEfTTDpYHYJI";
     console.log("Checking prices for product:", productId);

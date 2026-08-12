@@ -1,8 +1,8 @@
 import { getStripe } from '../config/stripe';
 import { db } from '../config/db';
-import { getSubscriptionPlanId } from '../config/pricing';
 import { AppError } from '../utils/AppError';
 import { FieldValue } from 'firebase-admin/firestore';
+import { logger } from '../utils/logger';
 
 export class SubscriptionService {
 
@@ -117,7 +117,7 @@ export class SubscriptionService {
             );
         }
 
-        console.log(`[SubscriptionService] Creating Checkout Session:`, {
+        logger.info(`[SubscriptionService] Creating Checkout Session:`, {
             userId, email, role, planId, country,
             productId,
             priceId: priceId || 'NONE',
@@ -150,7 +150,7 @@ export class SubscriptionService {
                 } catch (err: any) {
                     // If customer not found (e.g., from old test environment), reset it
                     if (err.code === 'resource_missing' || err.status === 404 || (err.raw && err.raw.status === 404)) {
-                        console.log(`[INFO] Resetting invalid stripeCustomerId ${stripeCustomerId} for user ${userId}`);
+                        logger.info(`[INFO] Resetting invalid stripeCustomerId ${stripeCustomerId} for user ${userId}`);
                         stripeCustomerId = undefined;
                     } else {
                         throw err; // Rethrow other unexpected errors

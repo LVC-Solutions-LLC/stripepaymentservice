@@ -25,15 +25,10 @@ export const syncPricing = async (req: Request, res: Response, next: NextFunctio
         const result = await adminPricingService.syncStripeProduct(req.body, req.body.stripeMode);
         res.status(200).json({
             status: 'success',
-            data: result
+            data: result,
         });
-    } catch (err: any) {
-        console.error("syncPricing Error:", err);
-        // We'll also return a 400 with the error message so Next.js sees it in the catch block rather than just 'error'
-        res.status(400).json({
-            status: 'error',
-            message: err.message
-        });
+    } catch (err) {
+        next(err);
     }
 };
 
@@ -42,13 +37,9 @@ export const syncFullPricing = async (req: Request, res: Response, next: NextFun
         const result = await adminPricingService.syncFullPricingConfig(req.body, req.body.stripeMode);
         res.status(200).json({
             status: 'success',
-            data: result
+            data: result,
         });
-    } catch (err: any) {
-        console.error("syncFullPricing Error:", err);
-        res.status(400).json({
-            status: 'error',
-            message: err.message
-        });
+    } catch (err) {
+        next(err);
     }
 };

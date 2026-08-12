@@ -12,9 +12,9 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
     const signature = req.headers['stripe-signature'] as string;
     let event;
 
-    const webhookSecret = env.STRIPE_MODE === 'live'
-        ? (env.STRIPE_LIVE_WEBHOOK_SECRET || env.STRIPE_WEBHOOK_SECRET)
-        : (env.STRIPE_TEST_WEBHOOK_SECRET || env.STRIPE_WEBHOOK_SECRET);
+    const webhookSecret = (env.STRIPE_MODE === 'live'
+        ? env.STRIPE_LIVE_WEBHOOK_SECRET
+        : env.STRIPE_TEST_WEBHOOK_SECRET) || '';
 
     try {
         event = stripe.webhooks.constructEvent(

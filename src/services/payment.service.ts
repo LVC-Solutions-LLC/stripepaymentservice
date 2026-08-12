@@ -1,6 +1,6 @@
 import { getStripe } from '../config/stripe';
 import { db } from '../config/db';
-import { getOneTimeFee } from '../config/pricing';
+import defaultPricing from '../config/defaultPricing.json';
 import { AppError } from '../utils/AppError';
 import { FieldValue } from 'firebase-admin/firestore';
 import { logger } from '../utils/logger';
@@ -17,10 +17,22 @@ export class PaymentService {
         stripeMode?: 'test' | 'live'
     ) {
         const stripe = getStripe(stripeMode);
-        // 1. Calculate amount
-        const amount = getOneTimeFee(role, country);
-        // Dynamic currency: if country is 'IN', use 'inr', else 'usd'
+        
+        // 1. Calculate dynamic amount from Firestore configurations/pricing
+        const pricingDoc = await db.collection('configurations').doc('pricing').get();
+        const pricingConfig = pricingDoc.exists ? pricingDoc.data() : defaultPricing;
+        
+        const regionKey = country === 'IN' ? 'india' : 'global';
+        const priceField = country === 'IN' ? 'price_inr' : 'price_usd';
         const currency = country === 'IN' ? 'inr' : 'usd';
+
+        const roleVerificationData = (pricingConfig?.verificationFees as any)?.[role]?.[regionKey];
+        
+        let amount = Number(roleVerificationData?.[priceField] ?? (roleVerificationData?.max ? roleVerificationData.max * 100 : null));
+        if (!amount || isNaN(amount) || amount <= 0) {
+            // Default fallback if not defined in config
+            amount = country === 'IN' ? 49900 : 2000;
+        }
 
         // 2. Find or Create User in 'users' collection
         const userRef = db.collection('users').doc(userId);
@@ -54,7 +66,7 @@ export class PaymentService {
                 } catch (err: any) {
                     // If customer not found (e.g., from old test environment), reset it
                     if (err.code === 'resource_missing' || err.status === 404 || (err.raw && err.raw.status === 404)) {
-                        console.log(`[INFO] Resetting invalid stripeCustomerId ${stripeCustomerId} for user ${userId}`);
+                        logger.info(`[INFO] Resetting invalid stripeCustomerId ${stripeCustomerId} for user ${userId}`);
                         stripeCustomerId = undefined;
                     } else {
                         throw err; // Rethrow other unexpected errors
@@ -164,7 +176,7 @@ export class PaymentService {
             });
             return newPrice.id;
         } catch (error) {
-            console.error('[PaymentService] Error getting or creating Stripe Price:', error);
+            logger.error('[PaymentService] Error getting or creating Stripe Price:', error);
             return null;
         }
     }
@@ -221,7 +233,7 @@ export class PaymentService {
         // Use provided amount (major units -> * 100) or DB amount (minor units) or hardcoded default
         const finalizedAmount = amount 
              ? Math.round(Number(amount) * 100) 
-             : (dbAmountNumeric > 0 ? dbAmountNumeric : getOneTimeFee(role, country));
+             : (dbAmountNumeric > 0 ? dbAmountNumeric : (isIndia ? 49900 : 2000));
         
         const finalizedLabel = label || (addonId ? addonId.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : `${role.replace(/_/g, ' ').toUpperCase()} Identity Verification`);
         const finalizedDescription = label ? `Payment for ${label}` : `One-time KYC verification fee for ${country}`;
@@ -244,7 +256,7 @@ export class PaymentService {
                     await stripe.customers.retrieve(stripeCustomerId);
                 } catch (err: any) {
                     if (err.code === 'resource_missing' || err.status === 404 || (err.raw && err.raw.status === 404)) {
-                        console.log(`[INFO] Resetting invalid stripeCustomerId ${stripeCustomerId} for user ${userId}`);
+                        logger.info(`[INFO] Resetting invalid stripeCustomerId ${stripeCustomerId} for user ${userId}`);
                         stripeCustomerId = undefined;
                     } else {
                         throw err;
@@ -316,7 +328,7 @@ export class PaymentService {
         } catch (err: any) {
             // If the error is specifically about an inactive price, retry using inline price_data
             if (finalPriceId && (err.message.includes('inactive') || err.message.includes('No such price'))) {
-                console.warn(`⚠️ [PaymentService] Price ${finalPriceId} is inactive or missing. Falling back to inline price_data.`);
+                logger.warn(`⚠️ [PaymentService] Price ${finalPriceId} is inactive or missing. Falling back to inline price_data.`);
                 session = await stripe.checkout.sessions.create({
                     customer: stripeCustomerId,
                     line_items: [
@@ -350,9 +362,9 @@ export class PaymentService {
                     },
                 });
             } else {
-                console.error(`❌ [PaymentService] Stripe Create Session Failed:`, err);
+                logger.error(`❌ [PaymentService] Stripe Create Session Failed:`, err);
                 if (err.raw) {
-                    console.error(`🔍 [Stripe Raw Error]:`, JSON.stringify(err.raw, null, 2));
+                    logger.error(`🔍 [Stripe Raw Error]:`, err.raw);
                 }
                 throw err;
             }
@@ -551,18 +563,30 @@ export class PaymentService {
                         updatedAt: FieldValue.serverTimestamp(),
                     }).catch(() => {});
 
-                    // 3. Mark user fee as paid but DO NOT auto-verify
+                    // 3. Mark user fee as paid but DO NOT auto-verify (must wait for admin approval)
                     await db.collection('users').doc(userId).update({
                         oneTimeFeeStatus: 'paid',
                         updatedAt: FieldValue.serverTimestamp(),
                     });
                 } else {
+                    // Non-company user (jobseeker, student, etc.): Mark fee as paid on user doc & case doc but DO NOT auto-verify
                     await db.collection('users').doc(userId).update({
-                        verified: true,
-                        verificationStatus: 'verified',
                         oneTimeFeeStatus: 'paid',
                         updatedAt: FieldValue.serverTimestamp(),
                     });
+
+                    try {
+                        const userDoc = await db.collection('users').doc(userId).get();
+                        const userData = userDoc.data();
+                        const caseId = userData?.manualVerificationCaseId || `CASE-JOBSEEKER-${userId.slice(0, 8).toUpperCase()}`;
+                        await db.collection('verifications').doc(caseId).set({
+                            paymentStatus: 'paid',
+                            paidAt: FieldValue.serverTimestamp(),
+                            updatedAt: FieldValue.serverTimestamp()
+                        }, { merge: true }).catch(() => {});
+                    } catch (caseErr: any) {
+                        logger.error(`[verifySession] ❌ Failed to update case paymentStatus for ${userId}:`, caseErr);
+                    }
                 }
 
                 return {
