@@ -177,6 +177,19 @@ export class SubscriptionService {
             // Ignore this error to allow frontend to test checkout
         }
 
+        // Resolve trial days from pricing config (stored at tier level or region level)
+        const trialDays: number | undefined = (() => {
+            const tierTrial = pricingData?.trialDays ?? pricingData?.trial_days;
+            if (tierTrial && Number(tierTrial) > 0) return Number(tierTrial);
+            const regionTrial = pricingData?.[countryKey]?.trialDays ?? pricingData?.[countryKey]?.trial_days;
+            if (regionTrial && Number(regionTrial) > 0) return Number(regionTrial);
+            return undefined;
+        })();
+
+        if (trialDays) {
+            logger.info(`[SubscriptionService] Trial period of ${trialDays} days applied for plan: ${planId}, country: ${country}`);
+        }
+
         // 3. Create Stripe Checkout Session for Subscription
         // IMPORTANT: Prefer stored priceId. Inline price_data can accidentally show invalid or zero values if pricePaise is miscalculated.
         const session = await stripe.checkout.sessions.create({
@@ -203,6 +216,7 @@ export class SubscriptionService {
                 registrationId: (role === 'company' || role === 'recruiter') ? (userDoc.data()?.companyId || '') : ''
             },
             subscription_data: {
+                ...(trialDays ? { trial_period_days: trialDays } : {}),
                 metadata: { 
                     userId, 
                     role, 

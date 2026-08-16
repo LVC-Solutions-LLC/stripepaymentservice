@@ -20,6 +20,15 @@ export const syncPricingSchema = z.object({
     }),
 });
 
+export const updateTrialDaysSchema = z.object({
+    body: z.object({
+        role: z.string().min(1),
+        tier: z.string().min(1),
+        // 0 = no trial, 1–730 = trial days
+        trialDays: z.number().int().min(0).max(730),
+    }),
+});
+
 export const syncPricing = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const result = await adminPricingService.syncStripeProduct(req.body, req.body.stripeMode);
@@ -35,6 +44,19 @@ export const syncPricing = async (req: Request, res: Response, next: NextFunctio
 export const syncFullPricing = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const result = await adminPricingService.syncFullPricingConfig(req.body, req.body.stripeMode);
+        res.status(200).json({
+            status: 'success',
+            data: result,
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
+export const updateTrialDays = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { role, tier, trialDays } = req.body;
+        const result = await adminPricingService.updateTrialDays(role, tier, trialDays);
         res.status(200).json({
             status: 'success',
             data: result,

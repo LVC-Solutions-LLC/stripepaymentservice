@@ -1,6 +1,7 @@
 import { getStripe } from '../config/stripe';
 import { db } from '../config/db';
 import { AppError } from '../utils/AppError';
+import { logger } from '../utils/logger';
 
 export class AdminPricingService {
     async syncStripeProduct(payload: {
@@ -204,7 +205,7 @@ export class AdminPricingService {
             if (category === 'showUpgradeButton') continue;
             const categoryConfig = rawTiers as any;
             results.subscriptions[category] = {
-                showUpgradeButton: categoryConfig.showUpgradeButton
+                showUpgradeButton: categoryConfig.showUpgradeButton ?? false
             };
             
             for (const [tier, tierData] of Object.entries((categoryConfig || {}) as any)) {
@@ -293,6 +294,21 @@ export class AdminPricingService {
             await new Promise(res => setTimeout(res, 150));
         }
 
+        // Fetch existing Firestore config to preserve trialDays values (set via admin UI, not part of sync payload)
+        const existingDoc = await db.collection('configurations').doc('pricing').get();
+        const existingData = existingDoc.data() || {};
+
+        // Merge trialDays back into subscription tiers so sync doesn't wipe them
+        for (const [category, tiers] of Object.entries(results.subscriptions as any)) {
+            for (const [tier, tierData] of Object.entries(tiers as any)) {
+                if (tier === 'showUpgradeButton') continue;
+                const existingTrialDays = existingData?.subscriptions?.[category]?.[tier]?.trialDays;
+                if (existingTrialDays !== undefined) {
+                    (results.subscriptions as any)[category][tier].trialDays = existingTrialDays;
+                }
+            }
+        }
+
         // Update Firestore one last time with the total config
         await db.collection('configurations').doc('pricing').set({
             ...results,
@@ -300,6 +316,28 @@ export class AdminPricingService {
         }, { merge: true });
 
         return results;
+    }
+
+    /**
+     * Update the trial days for a specific subscription role+tier.
+     * trialDays = 0 means no trial period.
+     */
+    async updateTrialDays(role: string, tier: string, trialDays: number) {
+        const field = `subscriptions.${role}.${tier}.trialDays`;
+        await db.collection('configurations').doc('pricing').update({
+            [field]: trialDays,
+        });
+
+        logger.info(`[AdminPricingService] Updated trialDays for ${role}.${tier} → ${trialDays}`);
+
+        return {
+            role,
+            tier,
+            trialDays,
+            message: trialDays === 0
+                ? `Trial period removed for ${role} / ${tier}`
+                : `Trial period set to ${trialDays} days for ${role} / ${tier}`,
+        };
     }
 
     private async withRetry<T>(fn: () => Promise<T>, retries = 3, delayMs = 1000): Promise<T> {

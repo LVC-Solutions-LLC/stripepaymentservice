@@ -4,6 +4,7 @@ import defaultPricing from '../config/defaultPricing.json';
 import { AppError } from '../utils/AppError';
 import { FieldValue } from 'firebase-admin/firestore';
 import { logger } from '../utils/logger';
+import { toSafeDate } from '../utils/dateUtils';
 
 export class PaymentService {
     /**
@@ -381,10 +382,18 @@ export class PaymentService {
             const stripe = getStripe(stripeMode);
             const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-            if (session.payment_status === 'paid') {
+            // For subscriptions: status=complete, payment_status can be
+            // 'no_payment_required' (trial) or 'paid'. For one-time: payment_status='paid'.
+            logger.info(`[verifySession] session.status=${session.status} payment_status=${session.payment_status} mode=${session.mode} subscription=${session.subscription}`);
+            const isSessionComplete = session.status === 'complete'
+                || session.payment_status === 'paid'
+                || (session.mode === 'subscription' && !!session.subscription);
+
+            if (isSessionComplete) {
                 const metadata = session.metadata || {};
                 const type = metadata.type;
                 logger.debug(`💳 [PaymentService] Verifying Stripe session metadata:`, metadata);
+
 
                 if (type === 'LAYOFF_PAYMENT') {
                     const registrationId = metadata.registrationId;
@@ -476,61 +485,226 @@ export class PaymentService {
                     };
                 }
 
-                if (type === 'SUBSCRIPTION') {
-                    const subscriptionId = session.subscription as string;
-                    const planId = metadata.planId || 'standard';
-                    const role = metadata.role || 'job_seeker';
-                    const registrationId = metadata.registrationId;
+                 if (type === 'SUBSCRIPTION') {
+                     const subscriptionId = session.subscription as string;
+                     const planId = metadata.planId || 'standard';
+                     const role = metadata.role || 'job_seeker';
+                     const registrationId = metadata.registrationId;
 
-                    if (subscriptionId) {
-                        const subRef = db.collection('subscriptions').doc(subscriptionId);
-                        const subDoc = await subRef.get();
+                     // Handle layoff subscription updates
+                     if (planId?.startsWith('layoff_') && registrationId) {
+                         const amountTotal = session.amount_total ? session.amount_total / 100 : 0;
+                         const currency = session.currency?.toUpperCase() || 'USD';
+                         await db.collection('layoffRegistrations').doc(registrationId).update({
+                             layoffPaymentStatus: 'completed',
+                             status: 'under_review',
+                             subscriptionPlan: {
+                                 planId: planId || 'layoff_unknown',
+                                 planName: planId ? planId.replace('layoff_', '').toUpperCase() : 'Layoff Plan',
+                                 price: `${amountTotal} ${currency}`
+                             },
+                             updatedAt: FieldValue.serverTimestamp(),
+                         });
+                         logger.info(`✅ [PaymentService] Updated layoffRegistrations status to completed for ${registrationId}`);
+                     }
 
-                        if (!subDoc.exists) {
-                            const stripe = getStripe(stripeMode);
-                            const stripeSub = await stripe.subscriptions.retrieve(subscriptionId);
-                            
-                            await subRef.set({
+                     if (subscriptionId) {
+                         logger.info(`[verifySession] Retrieving subscription ${subscriptionId} from Stripe (mode=${stripeMode || 'default'})`);
+                         const stripeInst = getStripe(stripeMode);
+                         let stripeSub: any;
+                         try {
+                             stripeSub = await stripeInst.subscriptions.retrieve(subscriptionId);
+                             logger.info(`[verifySession] Got subscription status=${stripeSub.status} trial_end=${stripeSub.trial_end}`);
+                         } catch (stripeErr: any) {
+                             logger.error(`[verifySession] ❌ stripe.subscriptions.retrieve failed:`, {
+                                 message: stripeErr?.message,
+                                 code: stripeErr?.code,
+                                 type: stripeErr?.type,
+                                 status: stripeErr?.statusCode ?? stripeErr?.status,
+                                 raw: stripeErr?.raw,
+                             });
+                             throw stripeErr;
+                         }
+                        const trialEnd = toSafeDate((stripeSub as any).trial_end);
+                        const subStatus = stripeSub.status || 'active';
+
+                         // Extract price details from the Stripe subscription item
+                         const priceObj = (stripeSub as any).items?.data?.[0]?.price;
+                         const subAmount = priceObj?.unit_amount ?? null;
+                         const subCurrency = priceObj?.currency ?? null;
+                         const subInterval = priceObj?.recurring?.interval ?? 'month';
+
+                        // If planId wasn't provided in session metadata, try to infer it from Stripe price/product
+                        let inferredPlanId = planId;
+                        if (!inferredPlanId) {
+                            try {
+                                const priceId = priceObj?.id;
+                                if (priceId) {
+                                    const priceFull = await stripeInst.prices.retrieve(priceId, { expand: ['product'] });
+                                    const prod: any = priceFull.product;
+                                    // Prefer explicit metadata.planId on the product
+                                    inferredPlanId = prod?.metadata?.planId || priceFull?.nickname || (prod?.name ? prod.name.toString().toLowerCase().replace(/\s+/g, '_') : undefined);
+                                    logger.info(`[verifySession] Inferred planId=${inferredPlanId} from price/product metadata`);
+                                }
+                            } catch (inferErr: any) {
+                                logger.warn(`[verifySession] Could not infer planId from price/product: ${inferErr?.message || inferErr}`);
+                            }
+                        }
+
+                        const finalPlanId = inferredPlanId || 'standard';
+
+                        // Derive a human-readable plan name from the finalPlanId
+                        const subPlanName = finalPlanId
+                            ? finalPlanId.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())
+                            : 'Free';
+
+                         // Upsert full subscription record
+                            const subRecord: any = {
                                 id: subscriptionId,
                                 userId,
                                 role,
-                                planId,
-                                registrationId,
-                                status: 'active',
-                                currentPeriodEnd: new Date((stripeSub as any).current_period_end * 1000),
-                                createdAt: FieldValue.serverTimestamp(),
-                                updatedAt: FieldValue.serverTimestamp(),
-                                customerId: session.customer as string,
-                                metadata: metadata
-                            });
-                            logger.info(`✅ [PaymentService] Created subscription record for ${subscriptionId}`);
-                        }
-                    }
+                                planId: finalPlanId,
+                                planName: subPlanName,
+                             registrationId: registrationId || null,
+                             status: subStatus,
+                             amount: subAmount,
+                             currency: subCurrency,
+                             interval: subInterval,
+                        };
 
-                    if (planId?.startsWith('layoff_') && registrationId) {
-                        const amountTotal = session.amount_total ? session.amount_total / 100 : 0;
-                        const currency = session.currency?.toUpperCase() || 'USD';
-                        await db.collection('layoffRegistrations').doc(registrationId).update({
-                            layoffPaymentStatus: 'completed',
-                            status: 'under_review',
-                            subscriptionPlan: {
-                                planId: planId || 'layoff_unknown',
-                                planName: planId ? planId.replace('layoff_', '').toUpperCase() : 'Layoff Plan',
-                                price: `${amountTotal} ${currency}`
-                            },
+                        const cps = toSafeDate((stripeSub as any).current_period_start);
+                        const cpe = toSafeDate((stripeSub as any).current_period_end);
+
+                        if (cps) subRecord.currentPeriodStart = cps;
+                        if (cpe) subRecord.currentPeriodEnd = cpe;
+
+                        // continue building record
+                        Object.assign(subRecord, {
+                            cancelAtPeriodEnd: (stripeSub as any).cancel_at_period_end ?? false,
+                            stripePriceId: priceObj?.id || null,
+                            customerId: session.customer as string,
                             updatedAt: FieldValue.serverTimestamp(),
                         });
-                        logger.info(`✅ [PaymentService] Updated layoffRegistrations status to completed for ${registrationId}`);
-                    }
+                        if (trialEnd) subRecord.trialEnd = trialEnd;
 
-                    return {
-                        status: 'success',
-                        message: 'Subscription verified and recorded',
-                        verified: true,
-                        type: 'SUBSCRIPTION',
-                        planId: planId
-                    };
-                }
+                        // Ensure we maintain a single subscription document per user.
+                        // If an existing active/trialing/incomplete subscription doc exists for this user,
+                        // reuse that document ID to avoid creating multiple records for the same user.
+                        let targetDocId = subscriptionId;
+                        try {
+                            const existingSnap = await db.collection('subscriptions')
+                                .where('userId', '==', userId)
+                                .orderBy('createdAt', 'desc')
+                                .limit(1)
+                                .get();
+                            if (!existingSnap.empty) {
+                                const existingDoc = existingSnap.docs[0];
+                                const existingData = existingDoc.data() || {};
+                                if (['active', 'trialing', 'incomplete'].includes(existingData.status) && existingDoc.id !== subscriptionId) {
+                                    logger.info(`[verifySession] Found existing subscription doc ${existingDoc.id} for user ${userId}; will reuse it instead of creating ${subscriptionId}`);
+                                    targetDocId = existingDoc.id;
+                                }
+                            }
+                        } catch (qErr: any) {
+                            // If ordering requires an index or the query fails, ignore and fall back to creating/using subscriptionId
+                            logger.warn(`[verifySession] Could not lookup existing subscription doc for user ${userId}: ${qErr?.message || qErr}`);
+                        }
+
+                        const subRef = db.collection('subscriptions').doc(targetDocId);
+                        const subDoc = await subRef.get();
+                        if (!subDoc.exists) subRecord.createdAt = FieldValue.serverTimestamp();
+                        logger.info(`[verifySession] STEP: upserting subscriptions collection doc ${targetDocId} (stripe subscriptionId=${subscriptionId})`);
+                         logger.info(`[verifySession] SUB_RECORD: ${JSON.stringify({ id: subscriptionId, planId: subRecord.planId, planName: subRecord.planName, amount: subRecord.amount, currency: subRecord.currency, currentPeriodEnd: !!subRecord.currentPeriodEnd })}`);
+                         await subRef.set(subRecord, { merge: true });
+                         logger.info(`✅ [PaymentService] Upserted subscription record for ${subscriptionId}`);
+
+                         // Write to user doc immediately — do not wait for webhook
+                         // Single enriched activeSubscription field — works for ALL roles
+                        logger.info(`[verifySession] STEP: building activeSubscription for userId=${userId}`);
+                        const activeSubscription: any = {
+                            subscriptionId,
+                            planId: finalPlanId,
+                            planName: subPlanName,
+                            status: subStatus,
+                            role,
+                            amount: subAmount,
+                            currency: subCurrency,
+                            interval: subInterval,
+                            subscriptionStarted: new Date().toISOString(),
+                            ...(subRecord.currentPeriodStart ? { currentPeriodStart: subRecord.currentPeriodStart } : {}),
+                            ...(subRecord.currentPeriodEnd ? { currentPeriodEnd: subRecord.currentPeriodEnd } : {}),
+                            cancelAtPeriodEnd: subRecord.cancelAtPeriodEnd ?? false,
+                            ...(trialEnd ? { trialEnd } : {}),
+                            updatedAt: FieldValue.serverTimestamp(),
+                        };
+
+                        logger.info(`[verifySession] ACTIVE_SUBSCRIPTION_BEFORE_WRITE: ${JSON.stringify({ planId: activeSubscription.planId, planName: activeSubscription.planName, status: activeSubscription.status, currentPeriodEnd: !!activeSubscription.currentPeriodEnd, trialEnd: !!activeSubscription.trialEnd })}`);
+
+                         const userUpdate: any = { activeSubscription };
+
+                         // Legacy mirrors — keep existing readers working
+                         const isActiveOrTrialing = subStatus === 'active' || subStatus === 'trialing';
+                         if (role === 'job_seeker' || role === 'student_job_seeker') {
+                             userUpdate.jobSeekerSubscription = {
+                                 subscriptionId,
+                                 planId: finalPlanId,
+                                 jobSeekerPremiumStatus: isActiveOrTrialing ? finalPlanId : 'free',
+                                 status: subStatus,
+                                 subscriptionStarted: new Date().toISOString(),
+                                currentPeriodEnd: subRecord.currentPeriodEnd || null,
+                                 ...(trialEnd ? { trialEnd } : {}),
+                                 lastUpdated: FieldValue.serverTimestamp(),
+                             };
+                         } else if (role === 'company' || role === 'recruiter') {
+                             userUpdate.recruiterSubscription = {
+                                 subscriptionId,
+                                 planId: finalPlanId,
+                                 recruiterPremiumStatus: isActiveOrTrialing ? 'paid' : 'free',
+                                 status: subStatus,
+                                currentPeriodEnd: subRecord.currentPeriodEnd || null,
+                                 lastUpdated: FieldValue.serverTimestamp(),
+                             };
+                         }
+
+                         try {
+                             await db.collection('users').doc(userId).set(userUpdate, { merge: true });
+                             logger.info(`✅ [PaymentService] Wrote activeSubscription to user ${userId} (planId=${planId}, status=${subStatus})`);
+                         } catch (writeErr: any) {
+                             logger.error(`❌ [PaymentService] Failed to write user subscription for ${userId}: ${writeErr.message}`, writeErr);
+                         }
+
+
+                         return {
+                             status: 'success',
+                             message: 'Subscription verified and recorded',
+                             verified: true,
+                             type: 'SUBSCRIPTION',
+                             planId: finalPlanId,
+                             subscription: {
+                                 id: subscriptionId,
+                                 planId: finalPlanId,
+                                 planName: subPlanName,
+                                 status: subStatus,
+                                 amount: subAmount,
+                                 currency: subCurrency,
+                                 interval: subInterval,
+                                 currentPeriodStart: subRecord.currentPeriodStart || null,
+                                 currentPeriodEnd: subRecord.currentPeriodEnd || null,
+                                 cancelAtPeriodEnd: subRecord.cancelAtPeriodEnd,
+                                 ...(trialEnd ? { trialEnd } : {}),
+                                 createdAt: new Date(),
+                             }
+                         };
+                     }
+
+                     return {
+                         status: 'success',
+                         message: 'Subscription verified',
+                         verified: true,
+                         type: 'SUBSCRIPTION',
+                         planId,
+                     };
+                 }
 
                 let registrationId = metadata.registrationId;
 
@@ -603,8 +777,17 @@ export class PaymentService {
                 verified: false
             };
         } catch (error: any) {
-            logger.error(`❌ Error verifying session ${sessionId}:`, error);
-            return { status: 'error', message: error.message };
+            // Log full error details — Stripe errors are objects, not plain Error instances
+            logger.error(`❌ Error verifying session ${sessionId}:`, {
+                message: error?.message,
+                code: error?.code,
+                type: error?.type,
+                statusCode: error?.statusCode ?? error?.status,
+                raw: error?.raw,
+                stack: error?.stack,
+                stringified: JSON.stringify(error),
+            });
+            return { status: 'error', message: error?.message || JSON.stringify(error) || 'Unknown error' };
         }
     }
 }

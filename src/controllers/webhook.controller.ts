@@ -110,38 +110,72 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
                 logger.info(`Subscription ${subscription.id} for user ${subUserId} reached status: ${subscription.status}`);
 
                 if (subUserId) {
-                    const subData = {
+                    const trialEnd = subscription.trial_end
+                        ? new Date(subscription.trial_end * 1000)
+                        : null;
+
+                    // Extract price details from the Stripe subscription item
+                    const priceObj = subscription.items?.data?.[0]?.price;
+                    const subAmount = priceObj?.unit_amount ?? null;
+                    const subCurrency = priceObj?.currency ?? null;
+                    const subInterval = priceObj?.recurring?.interval ?? 'month';
+
+                    // Derive a human-readable plan name from the planId
+                    const subPlanName = subPlanId
+                        ? subPlanId.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())
+                        : 'Free';
+
+                    // Full subscription record in 'subscriptions' collection
+                    const subData: any = {
                         userId: subUserId,
                         status: subscription.status,
-                        planId: subPlanId, // Our logical plan name e.g. '1_seat'
-                        stripePriceId: subscription.items.data[0]?.price?.id || null, // raw Stripe price ID stored separately
+                        planId: subPlanId,
+                        planName: subPlanName,
                         role: subRole,
+                        amount: subAmount,
+                        currency: subCurrency,
+                        interval: subInterval,
+                        stripePriceId: priceObj?.id || null,
+                        currentPeriodStart: new Date(subscription.current_period_start * 1000),
                         currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+                        cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
                         updatedAt: FieldValue.serverTimestamp(),
                     };
+                    if (trialEnd) subData.trialEnd = trialEnd;
+                    if (event.type === 'customer.subscription.created') {
+                        subData.createdAt = FieldValue.serverTimestamp();
+                    }
 
                     await db.collection('subscriptions').doc(subscription.id).set(subData, { merge: true });
 
-                    // Also update the main user record for legacy compatibility
-                    const userUpdate: any = {};
-                    if (subRole === 'job_seeker') {
-                        userUpdate.jobSeekerSubscription = {
-                            subscriptionId: subscription.id,
-                            jobSeekerPremiumStatus: subscription.status === 'active' || subscription.status === 'trialing' ? subPlanId : 'free',
-                            lastUpdated: FieldValue.serverTimestamp(),
-                        };
-                    } else if (subRole === 'company') {
-                        userUpdate.recruiterSubscription = {
-                            subscriptionId: subscription.id,
-                            status: subscription.status,
-                            planId: subPlanId,
-                            lastUpdated: FieldValue.serverTimestamp(),
-                        };
+                    // Write activeSubscription — single enriched field for ALL roles
+                    const activeSubscription: any = {
+                        subscriptionId: subscription.id,
+                        planId: subPlanId,
+                        planName: subPlanName,
+                        status: subscription.status,
+                        role: subRole,
+                        amount: subAmount,
+                        currency: subCurrency,
+                        interval: subInterval,
+                        currentPeriodStart: subData.currentPeriodStart,
+                        currentPeriodEnd: subData.currentPeriodEnd,
+                        cancelAtPeriodEnd: subData.cancelAtPeriodEnd ?? false,
+                        ...(trialEnd ? { trialEnd } : {}),
+                        updatedAt: FieldValue.serverTimestamp(),
+                    };
+                    if (event.type === 'customer.subscription.created') {
+                        activeSubscription.subscriptionStarted = new Date().toISOString();
                     }
 
-                    await db.collection('users').doc(subUserId).update(userUpdate).catch(err => {
-                        logger.error(`Failed to update user record for subscription: ${err.message}`);
-                    });
+                    const userUpdate: any = { activeSubscription };
+
+                    try {
+                        await db.collection('users').doc(subUserId).set(userUpdate, { merge: true });
+                        logger.info(`✅ [Webhook] Wrote activeSubscription to user ${subUserId} (planId=${subPlanId}, status=${subscription.status})`);
+                    } catch (writeErr: any) {
+                        logger.error(`❌ [Webhook] Failed to write user subscription for ${subUserId}: ${writeErr.message}`, writeErr);
+                    }
                 }
                 break;
 
