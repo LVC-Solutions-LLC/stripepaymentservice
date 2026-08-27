@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import { env } from './config/env';
 import { AppError } from './utils/AppError';
+import { logger } from './utils/logger';
 import paymentRoutes from './routes/payment.routes';
 import subscriptionRoutes from './routes/subscription.routes';
 import webhookRoutes from './routes/webhook.routes';
@@ -64,14 +65,14 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     const statusCode = err.statusCode || 500;
     const status = err.status || 'error';
 
-    if (process.env.NODE_ENV === 'development') {
-        console.error('ERROR 💥', err);
+    if (env.NODE_ENV === 'development') {
+        logger.error('ERROR 💥', err);
     }
 
     res.status(statusCode).json({
         status: status,
         message: err.message,
-        ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
+        ...(env.NODE_ENV === 'development' && { stack: err.stack }),
     });
 });
 

@@ -1,0 +1,66 @@
+{
+  "verificationFees": {
+    "job_seeker": {
+      "india": { "price_inr": 49900, "max": 499, "currency": "INR", "symbol": "₹" },
+      "global": { "price_usd": 1000, "max": 10, "currency": "USD", "symbol": "$" }
+    },
+    "student_job_seeker": {
+      "india": { "price_inr": 19900, "max": 199, "currency": "INR", "symbol": "₹" },
+      "global": { "price_usd": 500, "max": 5, "currency": "USD", "symbol": "$" }
+    },
+    "recruiter": {
+      "india": { "price_inr": 199900, "max": 1999, "currency": "INR", "symbol": "₹" },
+      "global": { "price_usd": 4900, "max": 49, "currency": "USD", "symbol": "$" }
+    },
+    "company": {
+      "india": { "price_inr": 499900, "max": 4999, "currency": "INR", "symbol": "₹" },
+      "global": { "price_usd": 14900, "max": 149, "currency": "USD", "symbol": "$" }
+    },
+    "university": {
+      "india": { "price_inr": 999900, "max": 9999, "currency": "INR", "symbol": "₹" },
+      "global": { "price_usd": 29900, "max": 299, "currency": "USD", "symbol": "$" }
+    },
+    "sales_champion": {
+      "india": { "price_inr": 299900, "max": 2999, "currency": "INR", "symbol": "₹" },
+      "global": { "price_usd": 7900, "max": 79, "currency": "USD", "symbol": "$" }
+    }
+  },
+  "subscriptions": {
+    "job_seeker": {
+      "basic": {
+        "india": { "price_inr": 0, "max": 0, "currency": "INR", "symbol": "₹" },
+        "global": { "price_usd": 0, "max": 0, "currency": "USD", "symbol": "$" }
+      },
+      "standard": {
+        "india": { "price_inr": 49900, "max": 499, "currency": "INR", "symbol": "₹" },
+        "global": { "price_usd": 1000, "max": 10, "currency": "USD", "symbol": "$" }
+      },
+      "premium": {
+        "india": { "price_inr": 99900, "max": 999, "currency": "INR", "symbol": "₹" },
+        "global": { "price_usd": 2000, "max": 20, "currency": "USD", "symbol": "$" }
+      }
+    },
+    "company": {
+      "1_seat": {
+        "seats": 1,
+        "india": { "price_inr": 299900, "max": 2999, "currency": "INR", "symbol": "₹" },
+        "global": { "price_usd": 7900, "max": 79, "currency": "USD", "symbol": "$" }
+      },
+      "5_seats": {
+        "seats": 5,
+        "india": { "price_inr": 999900, "max": 9999, "currency": "INR", "symbol": "₹" },
+        "global": { "price_usd": 24900, "max": 249, "currency": "USD", "symbol": "$" }
+      }
+    }
+  },
+  "addons": {
+    "employment_verification": {
+      "india": { "price_inr": 29900, "max": 299, "currency": "INR", "symbol": "₹" },
+      "global": { "price_usd": 900, "max": 9, "currency": "USD", "symbol": "$" }
+    },
+    "profile_boost": {
+      "india": { "price_inr": 19900, "max": 199, "currency": "INR", "symbol": "₹" },
+      "global": { "price_usd": 500, "max": 5, "currency": "USD", "symbol": "$" }
+    }
+  }
+}

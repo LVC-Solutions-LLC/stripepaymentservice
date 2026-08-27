@@ -3,6 +3,7 @@ import { db } from '../config/db';
 import { env } from '../config/env';
 import { AppError } from '../utils/AppError';
 import { FieldValue } from 'firebase-admin/firestore';
+import { logger } from '../utils/logger';
 import * as crypto from 'crypto';
 
 // ---------------------------------------------------------------------------
@@ -90,7 +91,7 @@ export class IdentityService {
             await userRef.update(statusUpdate);
         }
 
-        console.log(`[STRIPE] Creating session for user: ${userId}, email: ${email}, role: ${role}`);
+        logger.info(`[STRIPE] Creating session for user: ${userId}, email: ${email}, role: ${role}`);
 
         // Build metadata — include form name if supplied so the webhook can
         // retrieve it without a separate Firestore read.
@@ -114,8 +115,8 @@ export class IdentityService {
             return_url: returnUrl || `${env.FRONTEND_URL}/verification-status`,
         });
 
-        console.log(`✅ Identity Session created for user ${userId}: ${session.id}`);
-        console.log(`🔗 Verification URL: ${session.url}`);
+        logger.info(`✅ Identity Session created for user ${userId}: ${session.id}`);
+        logger.info(`🔗 Verification URL: ${session.url}`);
 
         // Log the session in the database, including the declared form name
         await db.collection('verifications').doc(session.id).set({
@@ -148,7 +149,7 @@ export class IdentityService {
             // If the session is verified, we MUST run the validation logic (Duplicate check, name match)
             // This prevents the "polling loophole".
             if (status === 'verified') {
-                console.log(`[SYNC] Session ${sessionId} is VERIFIED on Stripe. Running validation logic...`);
+                logger.info(`[SYNC] Session ${sessionId} is VERIFIED on Stripe. Running validation logic...`);
                 await this.internalValidateUserIdentity(session);
                 // The internal method handles database updates for users/verifications
             } else {
@@ -156,7 +157,7 @@ export class IdentityService {
                                 status === 'processing' ? 'processing' :
                                 status === 'canceled' ? 'failed' : status;
 
-                console.log(`[SYNC] Updating Firestore for user ${userId}. New status: ${dbStatus}`);
+                logger.info(`[SYNC] Updating Firestore for user ${userId}. New status: ${dbStatus}`);
 
                 await db.collection('users').doc(userId).update({
                     identityVerificationStatus: dbStatus,
@@ -177,7 +178,7 @@ export class IdentityService {
     }
 
     async getLatestVerificationSession(userId: string, stripeMode: 'test' | 'live' = 'test'): Promise<any> {
-        console.log(`[LATEST] Fetching last verification for user: ${userId}`);
+        logger.debug(`[LATEST] Fetching last verification for user: ${userId}`);
 
         // WORKAROUND: Remove .orderBy() to avoid requiring a composite index in new environments (QA/Dev)
         const snapshot = await db.collection('verifications')
@@ -185,7 +186,7 @@ export class IdentityService {
             .get();
 
         if (snapshot.empty) {
-            console.log(`[LATEST] No sessions found for user ${userId}`);
+            logger.info(`[LATEST] No sessions found for user ${userId}`);
             return null;
         }
 
@@ -203,7 +204,7 @@ export class IdentityService {
 
         const latestDoc = docs[0];
         const sessionId = latestDoc.id;
-        console.log(`[LATEST] Found session ID: ${sessionId} via in-memory sort. Fetching from Stripe...`);
+        logger.debug(`[LATEST] Found session ID: ${sessionId} via in-memory sort. Fetching from Stripe...`);
 
         return this.getVerificationSession(sessionId, stripeMode, userId);
     }
@@ -227,14 +228,14 @@ export class IdentityService {
         const userId: string | undefined = session.metadata?.userId || session.client_reference_id;
 
         if (!userId) {
-            console.warn(`[VALIDATE] No userId found on session ${sessionId}. Skipping.`);
+            logger.warn(`[VALIDATE] No userId found on session ${sessionId}. Skipping.`);
             return;
         }
 
         // Check if we already finalised this session to avoid double-processing
         const existingVer = await db.collection('verifications').doc(sessionId).get();
         if (existingVer.exists && (existingVer.data()?.status === 'verified' || existingVer.data()?.status === 'under_review')) {
-            console.log(`[VALIDATE] Session ${sessionId} already processed. Skipping.`);
+            logger.info(`[VALIDATE] Session ${sessionId} already processed. Skipping.`);
             return;
         }
 
@@ -322,7 +323,7 @@ export class IdentityService {
             finalStatus = 'under_review';
         }
 
-        console.log(`[VALIDATE] User ${userId} final validation status: ${finalStatus}. Reasons: ${suspiciousReasons.join(', ')}`);
+        logger.info(`[VALIDATE] User ${userId} final validation status: ${finalStatus}. Reasons: ${suspiciousReasons.join(', ')}`);
 
         // 7. Update User
         await db.collection('users').doc(userId).update({
@@ -363,6 +364,6 @@ export class IdentityService {
             });
         }
 
-        console.log(`[VALIDATE] ✅ User ${userId} final status: ${finalStatus}`);
+        logger.info(`[VALIDATE] ✅ User ${userId} final status: ${finalStatus}`);
     }
 }

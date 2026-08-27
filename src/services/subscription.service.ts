@@ -1,8 +1,8 @@
 import { getStripe } from '../config/stripe';
 import { db } from '../config/db';
-import { getSubscriptionPlanId } from '../config/pricing';
 import { AppError } from '../utils/AppError';
 import { FieldValue } from 'firebase-admin/firestore';
+import { logger } from '../utils/logger';
 
 export class SubscriptionService {
 
@@ -117,7 +117,7 @@ export class SubscriptionService {
             );
         }
 
-        console.log(`[SubscriptionService] Creating Checkout Session:`, {
+        logger.info(`[SubscriptionService] Creating Checkout Session:`, {
             userId, email, role, planId, country,
             productId,
             priceId: priceId || 'NONE',
@@ -150,7 +150,7 @@ export class SubscriptionService {
                 } catch (err: any) {
                     // If customer not found (e.g., from old test environment), reset it
                     if (err.code === 'resource_missing' || err.status === 404 || (err.raw && err.raw.status === 404)) {
-                        console.log(`[INFO] Resetting invalid stripeCustomerId ${stripeCustomerId} for user ${userId}`);
+                        logger.info(`[INFO] Resetting invalid stripeCustomerId ${stripeCustomerId} for user ${userId}`);
                         stripeCustomerId = undefined;
                     } else {
                         throw err; // Rethrow other unexpected errors
@@ -175,6 +175,19 @@ export class SubscriptionService {
         if (existingSubsSnapshot && !existingSubsSnapshot.empty) {
             // throw new AppError('User already has an active subscription', 400);
             // Ignore this error to allow frontend to test checkout
+        }
+
+        // Resolve trial days from pricing config (stored at tier level or region level)
+        const trialDays: number | undefined = (() => {
+            const tierTrial = pricingData?.trialDays ?? pricingData?.trial_days;
+            if (tierTrial && Number(tierTrial) > 0) return Number(tierTrial);
+            const regionTrial = pricingData?.[countryKey]?.trialDays ?? pricingData?.[countryKey]?.trial_days;
+            if (regionTrial && Number(regionTrial) > 0) return Number(regionTrial);
+            return undefined;
+        })();
+
+        if (trialDays) {
+            logger.info(`[SubscriptionService] Trial period of ${trialDays} days applied for plan: ${planId}, country: ${country}`);
         }
 
         // 3. Create Stripe Checkout Session for Subscription
@@ -203,6 +216,7 @@ export class SubscriptionService {
                 registrationId: (role === 'company' || role === 'recruiter') ? (userDoc.data()?.companyId || '') : ''
             },
             subscription_data: {
+                ...(trialDays ? { trial_period_days: trialDays } : {}),
                 metadata: { 
                     userId, 
                     role, 
@@ -332,5 +346,171 @@ export class SubscriptionService {
             subscriptionId: updatedSub.id,
             discount: promoCode
         };
+    }
+
+    async getUserInvoices(identifier: string, stripeMode?: 'test' | 'live', limit: number = 50) {
+        const stripe = getStripe(stripeMode);
+        const trimmedId = identifier?.trim();
+
+        if (!trimmedId) {
+            throw new AppError('Login identifier (userId, email, or customerId) is required', 400);
+        }
+
+        let stripeCustomerId: string | undefined;
+        let subscriptionId: string | undefined;
+        let userEmail: string | undefined;
+
+        // 1. Direct Stripe IDs
+        if (trimmedId.startsWith('cus_')) {
+            stripeCustomerId = trimmedId;
+        } else if (trimmedId.startsWith('sub_')) {
+            subscriptionId = trimmedId;
+        } else {
+            // 2. Try Firestore users collection by doc ID (userId)
+            const userDoc = await db.collection('users').doc(trimmedId).get();
+            if (userDoc.exists) {
+                const userData = userDoc.data();
+                stripeCustomerId = userData?.stripeCustomerId;
+                subscriptionId = userData?.activeSubscription?.subscriptionId;
+                userEmail = userData?.email;
+            }
+
+            // 3. If not found by doc ID or if identifier contains '@', try finding by email
+            if (!stripeCustomerId && (!userDoc.exists || trimmedId.includes('@'))) {
+                const emailQuery = await db.collection('users')
+                    .where('email', '==', trimmedId.toLowerCase())
+                    .limit(1)
+                    .get();
+
+                if (!emailQuery.empty) {
+                    const userData = emailQuery.docs[0].data();
+                    stripeCustomerId = userData?.stripeCustomerId;
+                    subscriptionId = subscriptionId || userData?.activeSubscription?.subscriptionId;
+                    userEmail = userData?.email;
+                }
+            }
+
+            // 4. Try Firestore companies collection by doc ID or email or userId
+            if (!stripeCustomerId) {
+                const companyDoc = await db.collection('companies').doc(trimmedId).get();
+                if (companyDoc.exists) {
+                    const companyData = companyDoc.data();
+                    stripeCustomerId = companyData?.stripeCustomerId;
+                    userEmail = userEmail || companyData?.email || companyData?.contactEmail;
+                } else {
+                    const companyByEmail = await db.collection('companies')
+                        .where('email', '==', trimmedId.toLowerCase())
+                        .limit(1)
+                        .get();
+                    if (!companyByEmail.empty) {
+                        const companyData = companyByEmail.docs[0].data();
+                        stripeCustomerId = companyData?.stripeCustomerId;
+                        userEmail = userEmail || companyData?.email;
+                    }
+                }
+            }
+
+            // 5. If stripeCustomerId is still not found, search Stripe Customers directly by email
+            const searchEmail = userEmail || (trimmedId.includes('@') ? trimmedId.toLowerCase() : undefined);
+            if (!stripeCustomerId && searchEmail) {
+                try {
+                    const stripeCustomers = await stripe.customers.list({
+                        email: searchEmail,
+                        limit: 5,
+                    });
+                    if (stripeCustomers.data.length > 0) {
+                        stripeCustomerId = stripeCustomers.data[0].id;
+                    }
+                } catch (err: any) {
+                    logger.warn(`[getUserInvoices] Stripe customer lookup by email failed: ${err.message}`);
+                }
+            }
+
+            // 6. Check subscriptions collection by userId if subscriptionId still not found
+            if (!subscriptionId && !stripeCustomerId) {
+                const subSnap = await db.collection('subscriptions')
+                    .where('userId', '==', trimmedId)
+                    .limit(1)
+                    .get();
+                if (!subSnap.empty) {
+                    subscriptionId = subSnap.docs[0].id;
+                }
+            }
+        }
+
+        // If neither customerId nor subscriptionId could be resolved
+        if (!stripeCustomerId && !subscriptionId) {
+            logger.info(`[getUserInvoices] No Stripe customer or subscription found for identifier: ${trimmedId}`);
+            return [];
+        }
+
+        // 7. Fetch Invoices from Stripe with fallback for stale customer IDs
+        const mapInvoice = (inv: any) => ({
+            id: inv.id,
+            invoiceNumber: inv.number || null,
+            invoicePdf: inv.invoice_pdf || null, // Direct Stripe PDF download link
+            hostedInvoiceUrl: inv.hosted_invoice_url || null, // Stripe hosted web invoice link
+            status: inv.status,
+            amountPaid: inv.amount_paid,
+            amountDue: inv.amount_due,
+            total: inv.total,
+            subtotal: inv.subtotal,
+            currency: inv.currency,
+            periodStart: inv.period_start ? new Date(inv.period_start * 1000).toISOString() : null,
+            periodEnd: inv.period_end ? new Date(inv.period_end * 1000).toISOString() : null,
+            created: new Date(inv.created * 1000).toISOString(),
+            dueDate: inv.due_date ? new Date(inv.due_date * 1000).toISOString() : null,
+            paidAt: inv.status_transitions?.paid_at ? new Date(inv.status_transitions.paid_at * 1000).toISOString() : null,
+            subscriptionId: typeof inv.subscription === 'string' ? inv.subscription : (inv.subscription?.id || null),
+            customerEmail: inv.customer_email || null,
+            customerName: inv.customer_name || null,
+            items: (inv.lines?.data || []).map((item: any) => ({
+                id: item.id,
+                description: item.description || null,
+                amount: item.amount,
+                currency: item.currency,
+                quantity: item.quantity,
+                period: {
+                    start: item.period?.start ? new Date(item.period.start * 1000).toISOString() : null,
+                    end: item.period?.end ? new Date(item.period.end * 1000).toISOString() : null,
+                },
+                priceId: item.price?.id || null,
+                productId: typeof item.price?.product === 'string' ? item.price.product : (item.price?.product?.id || null),
+            })),
+        });
+
+        try {
+            const invoiceParams: any = {
+                limit: Math.min(Math.max(limit, 1), 100),
+            };
+            if (stripeCustomerId) {
+                invoiceParams.customer = stripeCustomerId;
+            } else if (subscriptionId) {
+                invoiceParams.subscription = subscriptionId;
+            }
+
+            const stripeInvoices = await stripe.invoices.list(invoiceParams);
+            return stripeInvoices.data.map(mapInvoice);
+        } catch (err: any) {
+            if (err.code === 'resource_missing' || err.status === 404 || (err.raw && err.raw.status === 404)) {
+                logger.warn(`[getUserInvoices] Customer or Subscription not found on Stripe (${err.message}). Checking email fallback...`);
+                if (userEmail && stripeCustomerId) {
+                    try {
+                        const stripeCustomers = await stripe.customers.list({ email: userEmail, limit: 1 });
+                        if (stripeCustomers.data.length > 0 && stripeCustomers.data[0].id !== stripeCustomerId) {
+                            const retryInvoices = await stripe.invoices.list({
+                                customer: stripeCustomers.data[0].id,
+                                limit: Math.min(Math.max(limit, 1), 100),
+                            });
+                            return retryInvoices.data.map(mapInvoice);
+                        }
+                    } catch (retryErr: any) {
+                        logger.warn(`[getUserInvoices] Retry by email failed: ${retryErr.message}`);
+                    }
+                }
+                return [];
+            }
+            throw err;
+        }
     }
 }
