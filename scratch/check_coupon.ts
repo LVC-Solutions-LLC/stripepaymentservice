@@ -6,7 +6,7 @@ dotenv.config();
 
 async function checkCoupon(mode: 'test' | 'live') {
     console.log(`\n--- Checking ${mode.toUpperCase()} mode ---`);
-    const key = mode === 'live' ? process.env.STRIPE_SECRET_KEY : (process.env.STRIPE_TEST_SECRET_KEY || process.env.STRIPE_SECRET_KEY);
+    const key = mode === 'live' ? process.env.STRIPE_LIVE_SECRET_KEY : process.env.STRIPE_TEST_SECRET_KEY;
     
     if (!key) {
         console.log(`No key found for ${mode}`);

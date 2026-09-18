@@ -240,7 +240,7 @@ function buildFirestorePayload(ids: Record<string, StripeIds>) {
 
     subscriptions: {
       job_seeker: {
-        basic:    { india: 39900,    global: 900,    price_inr: 39900,    price_usd: 900,    ...g("subscriptions.job_seeker.basic"),      benefits: ["Apply to up to 20 jobs per month","Basic profile visibility","Access to standard job listings","Email job alerts"] },
+        basic:    { india: 39900,    global: 900,    price_inr: 39900,    price_usd: 900,    trialDays: 30, ...g("subscriptions.job_seeker.basic"),      benefits: ["Apply to up to 20 jobs per month","Basic profile visibility","Access to standard job listings","Email job alerts"] },
         standard: { india: 79900,    global: 1900,   price_inr: 79900,    price_usd: 1900,   ...g("subscriptions.job_seeker.standard"),   benefits: ["Apply to up to 60 jobs per month","Enhanced profile ranking in searches","Access to premium job listings","Resume builder tool","Priority email support"] },
         premium:  { india: 249900,   global: 4900,   price_inr: 249900,   price_usd: 4900,   ...g("subscriptions.job_seeker.premium"),    benefits: ["Unlimited job applications","Top placement in recruiter searches","Access to all job listings including hidden","AI-powered resume optimization","1-on-1 career advisor session per month","Interview preparation resources"] },
       },

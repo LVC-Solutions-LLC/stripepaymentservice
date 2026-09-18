@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { IdentityService } from '../services/identity.service';
 import { z } from 'zod';
+import { AppError } from '../utils/AppError';
+import { logger } from '../utils/logger';
 
 const identityService = new IdentityService();
 
@@ -40,15 +42,15 @@ export const createIdentitySession = async (req: Request, res: Response, next: N
 export const getIdentitySession = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { sessionId } = req.params;
-        const { stripeMode, userId } = req.query as { stripeMode?: 'test' | 'live', userId?: string };
+        const { stripeMode, userId } = req.query as { stripeMode?: 'test' | 'live'; userId?: string };
 
         // SECURITY/STABILITY: Ignore literal Stripe placeholders
         if (sessionId.includes('{VERIFICATION_SESSION_ID}') || sessionId.includes('%7BVERIFICATION_SESSION_ID%7D')) {
-            console.log(`[POLL_REJECTED] Literal placeholder detected: ${sessionId}. Triggering fallback...`);
-            return res.status(404).json({ error: 'Placeholder session ID detected. Please use the /latest endpoint or check back in a minute.' });
+            logger.warn(`[POLL_REJECTED] Literal placeholder detected: ${sessionId}. Triggering fallback...`);
+            return next(new AppError('Placeholder session ID detected. Please use the /latest endpoint or check back in a minute.', 404));
         }
 
-        console.log(`[POLL_REQUEST] Session: ${sessionId}, UserID: ${userId}, Mode: ${stripeMode || 'default'}`);
+        logger.debug(`[POLL_REQUEST] Session: ${sessionId}, UserID: ${userId}, Mode: ${stripeMode || 'default'}`);
 
         const session = await identityService.getVerificationSession(
             sessionId as string,
@@ -64,18 +66,18 @@ export const getIdentitySession = async (req: Request, res: Response, next: Next
 
 export const getLatestIdentitySession = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const { userId, stripeMode } = req.query as { userId: string, stripeMode?: 'test' | 'live' };
+        const { userId, stripeMode } = req.query as { userId: string; stripeMode?: 'test' | 'live' };
 
         if (!userId) {
-            return res.status(400).json({ error: 'userId is required' });
+            return next(new AppError('userId is required', 400));
         }
 
-        console.log(`[LATEST_REQUEST] UserID: ${userId}, Mode: ${stripeMode || 'default'}`);
+        logger.debug(`[LATEST_REQUEST] UserID: ${userId}, Mode: ${stripeMode || 'default'}`);
 
         const session = await identityService.getLatestVerificationSession(userId, stripeMode);
 
         if (!session) {
-            return res.status(404).json({ error: 'No verification session found for this user' });
+            return next(new AppError('No verification session found for this user', 404));
         }
 
         res.status(200).json(session);

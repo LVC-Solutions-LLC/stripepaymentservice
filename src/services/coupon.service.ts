@@ -1,6 +1,7 @@
 import { getStripe } from '../config/stripe';
 import { db } from '../config/db';
 import { AppError } from '../utils/AppError';
+import { logger } from '../utils/logger';
 
 export interface CreateCouponPayload {
     /** Human-readable display name shown in Stripe dashboard */
@@ -289,7 +290,7 @@ export class CouponService {
                 // If deletion fails (e.g. has redemptions), just mark inactive via update
                 // Stripe doesn't have a direct "deactivate" for coupons, but deleting the
                 // promotion code above already prevents new uses
-                console.warn(`[CouponService] Could not delete Stripe coupon ${couponId}: ${err.message}`);
+                logger.warn(`[CouponService] Could not delete Stripe coupon ${couponId}: ${err.message}`);
             }
         }
 

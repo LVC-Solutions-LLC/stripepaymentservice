@@ -1,6 +1,7 @@
 import { getStripe } from '../config/stripe';
 import { db } from '../config/db';
 import { AppError } from '../utils/AppError';
+import { logger } from '../utils/logger';
 
 export class AdminPricingService {
     async syncStripeProduct(payload: {
@@ -14,28 +15,61 @@ export class AdminPricingService {
         globalPriceCents: number;
         name: string;
         description?: string;
-    }, stripeMode?: 'test' | 'live') {
+    }, stripeMode?: 'test' | 'live', options?: { skipFirestoreUpdate?: boolean }) {
         const stripe = getStripe(stripeMode);
         let { type, role, tier, stripeProductId, stripePriceId_inr, stripePriceId_usd, indiaPricePaise, globalPriceCents, name, description } = payload;
 
         // 1. Resolve or Create Product
         if (!stripeProductId) {
-            const product = await stripe.products.create({
-                name: name,
-                description: description || `Pricing tier for ${role} ${tier || ''}`,
-                metadata: { type, role, tier: tier || '' }
-            });
-            stripeProductId = product.id;
+            // First search existing active products in Stripe by metadata or name before creating a new one!
+            try {
+                const existingProducts = await stripe.products.list({ limit: 100, active: true });
+                const match = existingProducts.data.find(p => 
+                    (p.metadata?.role === role && p.metadata?.tier === (tier || '') && p.metadata?.type === type) ||
+                    p.name === name ||
+                    p.name === `${name} (India)` ||
+                    p.name === `${name} (Global)`
+                );
+                if (match) {
+                    stripeProductId = match.id;
+                }
+            } catch (e) {
+                // Ignore lookup errors and proceed
+            }
+
+            if (!stripeProductId) {
+                const product = await stripe.products.create({
+                    name: name,
+                    description: description || `Pricing tier for ${role} ${tier || ''}`,
+                    metadata: { type, role, tier: tier || '' }
+                });
+                stripeProductId = product.id;
+            }
         } else {
             // Update existing
-            await stripe.products.update(stripeProductId, {
-                name: name,
-                description: description || `Pricing tier for ${role} ${tier || ''}`,
-            });
+            try {
+                await stripe.products.update(stripeProductId, {
+                    name: name,
+                    description: description || `Pricing tier for ${role} ${tier || ''}`,
+                });
+            } catch (err: any) {
+                // If product does not exist in current Stripe account (e.g. account switch or stale ID), create a new one!
+                if (err.code === 'resource_missing' || err.statusCode === 404 || err.message?.includes('No such product')) {
+                    const product = await stripe.products.create({
+                        name: name,
+                        description: description || `Pricing tier for ${role} ${tier || ''}`,
+                        metadata: { type, role, tier: tier || '' }
+                    });
+                    stripeProductId = product.id;
+                } else {
+                    throw err;
+                }
+            }
         }
 
-        // 2. Sync Prices (create new if amount changed)
+        // 2. Sync Prices (create new if amount changed) in parallel for INR and USD
         const syncPrice = async (amount: number, currency: string, existingPriceId?: string | null) => {
+            if (!amount || amount <= 0) return undefined;
             let needsNewPrice = true;
             if (existingPriceId) {
                 try {
@@ -53,7 +87,7 @@ export class AdminPricingService {
             if (needsNewPrice) {
                 const newPrice = await stripe.prices.create({
                     product: stripeProductId!,
-                    unit_amount: amount,
+                    unit_amount: Math.round(amount),
                     currency: currency.toLowerCase(),
                     recurring: type === 'SUBSCRIPTION' ? { interval: 'month' } : undefined,
                 });
@@ -62,44 +96,48 @@ export class AdminPricingService {
             return existingPriceId;
         };
 
-        const newPriceIdInr = await syncPrice(indiaPricePaise, 'INR', stripePriceId_inr);
-        const newPriceIdUsd = await syncPrice(globalPriceCents, 'USD', stripePriceId_usd);
+        const [newPriceIdInr, newPriceIdUsd] = await Promise.all([
+            syncPrice(indiaPricePaise, 'INR', stripePriceId_inr),
+            syncPrice(globalPriceCents, 'USD', stripePriceId_usd),
+        ]);
 
-        // 3. Update Firestore back with new Price IDs if they changed
-        const updateData: any = {};
-        if (role === 'addon' && tier) {
-            // Dual-sync: Update root AND regional nested objects
-            updateData[`addons.${tier}.stripeProductId`] = stripeProductId;
-            updateData[`addons.${tier}.stripePriceId_inr`] = newPriceIdInr;
-            updateData[`addons.${tier}.stripePriceId_usd`] = newPriceIdUsd;
+        if (!options?.skipFirestoreUpdate) {
+            // 3. Update Firestore back with new Price IDs if single product sync
+            const updateData: any = {};
+            if (role === 'addon' && tier) {
+                // Dual-sync: Update root AND regional nested objects
+                updateData[`addons.${tier}.stripeProductId`] = stripeProductId;
+                updateData[`addons.${tier}.stripePriceId_inr`] = newPriceIdInr;
+                updateData[`addons.${tier}.stripePriceId_usd`] = newPriceIdUsd;
 
-            updateData[`addons.${tier}.india.stripePriceId_inr`] = newPriceIdInr;
-            updateData[`addons.${tier}.india.stripeProductId`] = stripeProductId;
-            updateData[`addons.${tier}.global.stripePriceId_usd`] = newPriceIdUsd;
-            updateData[`addons.${tier}.global.stripeProductId`] = stripeProductId;
-        } else if (type === 'ONE_TIME') {
-            // Dual-sync for verification fees
-            updateData[`oneTime.${role}.stripeProductId`] = stripeProductId;
-            updateData[`oneTime.${role}.stripePriceId_inr`] = newPriceIdInr;
-            updateData[`oneTime.${role}.stripePriceId_usd`] = newPriceIdUsd;
-            
-            updateData[`oneTime.${role}.india.stripePriceId_inr`] = newPriceIdInr;
-            updateData[`oneTime.${role}.india.stripeProductId`] = stripeProductId;
-            updateData[`oneTime.${role}.global.stripePriceId_usd`] = newPriceIdUsd;
-            updateData[`oneTime.${role}.global.stripeProductId`] = stripeProductId;
-        } else if (tier) {
-            // Dual-sync for subscriptions
-            updateData[`subscriptions.${role}.${tier}.stripeProductId`] = stripeProductId;
-            updateData[`subscriptions.${role}.${tier}.stripePriceId_inr`] = newPriceIdInr;
-            updateData[`subscriptions.${role}.${tier}.stripePriceId_usd`] = newPriceIdUsd;
+                updateData[`addons.${tier}.india.stripePriceId_inr`] = newPriceIdInr;
+                updateData[`addons.${tier}.india.stripeProductId`] = stripeProductId;
+                updateData[`addons.${tier}.global.stripePriceId_usd`] = newPriceIdUsd;
+                updateData[`addons.${tier}.global.stripeProductId`] = stripeProductId;
+            } else if (type === 'ONE_TIME') {
+                // Dual-sync for verification fees
+                updateData[`oneTime.${role}.stripeProductId`] = stripeProductId;
+                updateData[`oneTime.${role}.stripePriceId_inr`] = newPriceIdInr;
+                updateData[`oneTime.${role}.stripePriceId_usd`] = newPriceIdUsd;
+                
+                updateData[`oneTime.${role}.india.stripePriceId_inr`] = newPriceIdInr;
+                updateData[`oneTime.${role}.india.stripeProductId`] = stripeProductId;
+                updateData[`oneTime.${role}.global.stripePriceId_usd`] = newPriceIdUsd;
+                updateData[`oneTime.${role}.global.stripeProductId`] = stripeProductId;
+            } else if (tier) {
+                // Dual-sync for subscriptions
+                updateData[`subscriptions.${role}.${tier}.stripeProductId`] = stripeProductId;
+                updateData[`subscriptions.${role}.${tier}.stripePriceId_inr`] = newPriceIdInr;
+                updateData[`subscriptions.${role}.${tier}.stripePriceId_usd`] = newPriceIdUsd;
 
-            updateData[`subscriptions.${role}.${tier}.india.stripePriceId_inr`] = newPriceIdInr;
-            updateData[`subscriptions.${role}.${tier}.india.stripeProductId`] = stripeProductId;
-            updateData[`subscriptions.${role}.${tier}.global.stripePriceId_usd`] = newPriceIdUsd;
-            updateData[`subscriptions.${role}.${tier}.global.stripeProductId`] = stripeProductId;
+                updateData[`subscriptions.${role}.${tier}.india.stripePriceId_inr`] = newPriceIdInr;
+                updateData[`subscriptions.${role}.${tier}.india.stripeProductId`] = stripeProductId;
+                updateData[`subscriptions.${role}.${tier}.global.stripePriceId_usd`] = newPriceIdUsd;
+                updateData[`subscriptions.${role}.${tier}.global.stripeProductId`] = stripeProductId;
+            }
+
+            await db.collection('configurations').doc('pricing').update(updateData);
         }
-
-        await db.collection('configurations').doc('pricing').update(updateData);
 
         return {
             stripeProductId,
@@ -120,48 +158,46 @@ export class AdminPricingService {
             return { max: Number(val) || 0 };
         };
 
+        const tasks: (() => Promise<void>)[] = [];
+
         // 1. Verification Fees
         for (const [role, rawRegions] of Object.entries((config.verificationFees || {}) as any)) {
             const regions = rawRegions as any;
             const india = ensureObject(regions.india);
             const global = ensureObject(regions.global);
             
-            results.verificationFees[role] = { india, global };
-            
-            // India
-            const indiaPricePaise = (Number(india.price_inr) || (Number(india.max) * 100) || 0);
-            if (indiaPricePaise > 0) {
+            results.verificationFees[role] = { ...regions, india, global };
+
+            tasks.push(async () => {
+                const indiaPricePaise = (Number(india.price_inr) || (Number(india.max) * 100) || 0);
+                const globalPriceCents = (Number(global.price_usd) || (Number(global.max) * 100) || 0);
+                const existingProductId = regions.stripeProductId || india.stripeProductId || global.stripeProductId;
+
                 const res = await this.syncStripeProduct({
-                    type: 'ONE_TIME', role, tier: 'verification_india',
+                    type: 'ONE_TIME', role, tier: 'verification',
                     indiaPricePaise, 
-                    globalPriceCents: (Number(global.price_usd) || (Number(global.max) * 100) || 0),
-                    name: `LVC - ${role} Verification (India)`,
-                    stripeProductId: india.stripeProductId,
-                    stripePriceId_inr: india.stripePriceId_inr
-                }, stripeMode);
+                    globalPriceCents,
+                    name: `LVC - ${role} Verification`,
+                    stripeProductId: existingProductId,
+                    stripePriceId_inr: india.stripePriceId_inr || regions.stripePriceId_inr,
+                    stripePriceId_usd: global.stripePriceId_usd || regions.stripePriceId_usd
+                }, stripeMode, { skipFirestoreUpdate: true });
+
+                results.verificationFees[role].stripeProductId = res.stripeProductId;
+                results.verificationFees[role].stripePriceId_inr = res.stripePriceId_inr;
+                results.verificationFees[role].stripePriceId_usd = res.stripePriceId_usd;
+
                 results.verificationFees[role].india = {
                     ...india,
                     stripeProductId: res.stripeProductId,
                     stripePriceId_inr: res.stripePriceId_inr
                 };
-            }
-            // Global
-            const globalPriceCents = (Number(global.price_usd) || (Number(global.max) * 100) || 0);
-            if (globalPriceCents > 0) {
-                const res = await this.syncStripeProduct({
-                    type: 'ONE_TIME', role, tier: 'verification_global',
-                    indiaPricePaise: (Number(india.price_inr) || (Number(india.max) * 100) || 0), 
-                    globalPriceCents,
-                    name: `LVC - ${role} Verification (Global)`,
-                    stripeProductId: global.stripeProductId,
-                    stripePriceId_usd: global.stripePriceId_usd
-                }, stripeMode);
                 results.verificationFees[role].global = {
                     ...global,
                     stripeProductId: res.stripeProductId,
                     stripePriceId_usd: res.stripePriceId_usd
                 };
-            }
+            });
         }
 
         // 2. Subscriptions
@@ -169,7 +205,7 @@ export class AdminPricingService {
             if (category === 'showUpgradeButton') continue;
             const categoryConfig = rawTiers as any;
             results.subscriptions[category] = {
-                showUpgradeButton: categoryConfig.showUpgradeButton
+                showUpgradeButton: categoryConfig.showUpgradeButton ?? false
             };
             
             for (const [tier, tierData] of Object.entries((categoryConfig || {}) as any)) {
@@ -180,40 +216,36 @@ export class AdminPricingService {
                 
                 results.subscriptions[category][tier] = { ...data, india, global };
 
-                // India
-                const indiaPricePaise = (Number(india.price_inr) || (Number(india.max) * 100) || 0);
-                if (indiaPricePaise > 0) {
+                tasks.push(async () => {
+                    const indiaPricePaise = (Number(india.price_inr) || (Number(india.max) * 100) || 0);
+                    const globalPriceCents = (Number(global.price_usd) || (Number(global.max) * 100) || 0);
+                    const existingProductId = data.stripeProductId || india.stripeProductId || global.stripeProductId;
+
                     const res = await this.syncStripeProduct({
                         type: 'SUBSCRIPTION', role: category, tier,
                         indiaPricePaise, 
-                        globalPriceCents: (Number(global.price_usd) || (Number(global.max) * 100) || 0),
-                        name: `LVC - ${category} ${tier} Subscription (India)`,
-                        stripeProductId: india.stripeProductId,
-                        stripePriceId_inr: india.stripePriceId_inr
-                    }, stripeMode);
+                        globalPriceCents,
+                        name: `LVC - ${category} ${tier} Subscription`,
+                        stripeProductId: existingProductId,
+                        stripePriceId_inr: india.stripePriceId_inr || data.stripePriceId_inr,
+                        stripePriceId_usd: global.stripePriceId_usd || data.stripePriceId_usd
+                    }, stripeMode, { skipFirestoreUpdate: true });
+
+                    results.subscriptions[category][tier].stripeProductId = res.stripeProductId;
+                    results.subscriptions[category][tier].stripePriceId_inr = res.stripePriceId_inr;
+                    results.subscriptions[category][tier].stripePriceId_usd = res.stripePriceId_usd;
+
                     results.subscriptions[category][tier].india = {
                         ...india,
                         stripeProductId: res.stripeProductId,
                         stripePriceId_inr: res.stripePriceId_inr
                     };
-                }
-                // Global
-                const globalPriceCents = (Number(global.price_usd) || (Number(global.max) * 100) || 0);
-                if (globalPriceCents > 0) {
-                    const res = await this.syncStripeProduct({
-                        type: 'SUBSCRIPTION', role: category, tier,
-                        indiaPricePaise: (Number(india.price_inr) || (Number(india.max) * 100) || 0), 
-                        globalPriceCents,
-                        name: `LVC - ${category} ${tier} Subscription (Global)`,
-                        stripeProductId: global.stripeProductId,
-                        stripePriceId_usd: global.stripePriceId_usd
-                    }, stripeMode);
                     results.subscriptions[category][tier].global = {
                         ...global,
                         stripeProductId: res.stripeProductId,
                         stripePriceId_usd: res.stripePriceId_usd
                     };
-                }
+                });
             }
         }
 
@@ -225,39 +257,55 @@ export class AdminPricingService {
             
             results.addons[addonKey] = { ...data, india, global };
 
-            // India
-            const indiaPricePaise = (Number(india.price_inr) || (Number(india.max) * 100) || 0);
-            if (indiaPricePaise > 0) {
+            tasks.push(async () => {
+                const indiaPricePaise = (Number(india.price_inr) || (Number(india.max) * 100) || 0);
+                const globalPriceCents = (Number(global.price_usd) || (Number(global.max) * 100) || 0);
+                const existingProductId = data.stripeProductId || india.stripeProductId || global.stripeProductId;
+
                 const res = await this.syncStripeProduct({
                     type: 'ONE_TIME', role: 'addon', tier: addonKey,
                     indiaPricePaise, 
-                    globalPriceCents: (Number(global.price_usd) || (Number(global.max) * 100) || 0),
-                    name: `LVC - ${addonKey} Addon (India)`,
-                    stripeProductId: india.stripeProductId,
-                    stripePriceId_inr: india.stripePriceId_inr
-                }, stripeMode);
+                    globalPriceCents,
+                    name: `LVC - ${addonKey} Addon`,
+                    stripeProductId: existingProductId,
+                    stripePriceId_inr: india.stripePriceId_inr || data.stripePriceId_inr,
+                    stripePriceId_usd: global.stripePriceId_usd || data.stripePriceId_usd
+                }, stripeMode, { skipFirestoreUpdate: true });
+
+                results.addons[addonKey].stripeProductId = res.stripeProductId;
+                results.addons[addonKey].stripePriceId_inr = res.stripePriceId_inr;
+                results.addons[addonKey].stripePriceId_usd = res.stripePriceId_usd;
+
                 results.addons[addonKey].india = {
                     ...india,
                     stripeProductId: res.stripeProductId,
                     stripePriceId_inr: res.stripePriceId_inr
                 };
-            }
-            // Global
-            const globalPriceCents = (Number(global.price_usd) || (Number(global.max) * 100) || 0);
-            if (globalPriceCents > 0) {
-                const res = await this.syncStripeProduct({
-                    type: 'ONE_TIME', role: 'addon', tier: addonKey,
-                    indiaPricePaise: (Number(india.price_inr) || (Number(india.max) * 100) || 0), 
-                    globalPriceCents,
-                    name: `LVC - ${addonKey} Addon (Global)`,
-                    stripeProductId: global.stripeProductId,
-                    stripePriceId_usd: global.stripePriceId_usd
-                }, stripeMode);
                 results.addons[addonKey].global = {
                     ...global,
                     stripeProductId: res.stripeProductId,
                     stripePriceId_usd: res.stripePriceId_usd
                 };
+            });
+        }
+
+        for (const task of tasks) {
+            await this.withRetry(task);
+            await new Promise(res => setTimeout(res, 150));
+        }
+
+        // Fetch existing Firestore config to preserve trialDays values (set via admin UI, not part of sync payload)
+        const existingDoc = await db.collection('configurations').doc('pricing').get();
+        const existingData = existingDoc.data() || {};
+
+        // Merge trialDays back into subscription tiers so sync doesn't wipe them
+        for (const [category, tiers] of Object.entries(results.subscriptions as any)) {
+            for (const [tier, tierData] of Object.entries(tiers as any)) {
+                if (tier === 'showUpgradeButton') continue;
+                const existingTrialDays = existingData?.subscriptions?.[category]?.[tier]?.trialDays;
+                if (existingTrialDays !== undefined) {
+                    (results.subscriptions as any)[category][tier].trialDays = existingTrialDays;
+                }
             }
         }
 
@@ -268,5 +316,41 @@ export class AdminPricingService {
         }, { merge: true });
 
         return results;
+    }
+
+    /**
+     * Update the trial days for a specific subscription role+tier.
+     * trialDays = 0 means no trial period.
+     */
+    async updateTrialDays(role: string, tier: string, trialDays: number) {
+        const field = `subscriptions.${role}.${tier}.trialDays`;
+        await db.collection('configurations').doc('pricing').update({
+            [field]: trialDays,
+        });
+
+        logger.info(`[AdminPricingService] Updated trialDays for ${role}.${tier} → ${trialDays}`);
+
+        return {
+            role,
+            tier,
+            trialDays,
+            message: trialDays === 0
+                ? `Trial period removed for ${role} / ${tier}`
+                : `Trial period set to ${trialDays} days for ${role} / ${tier}`,
+        };
+    }
+
+    private async withRetry<T>(fn: () => Promise<T>, retries = 3, delayMs = 1000): Promise<T> {
+        try {
+            return await fn();
+        } catch (err: any) {
+            const isRateLimit = err?.statusCode === 429 || err?.status === 429 || err?.type === 'StripeRateLimitError' || err?.message?.includes('Rate limit') || err?.message?.includes('rate limit');
+            if (retries > 0 && isRateLimit) {
+                console.warn(`[WARN] Stripe Rate limit hit. Retrying in ${delayMs}ms...`);
+                await new Promise(res => setTimeout(res, delayMs));
+                return this.withRetry(fn, retries - 1, delayMs * 2);
+            }
+            throw err;
+        }
     }
 }

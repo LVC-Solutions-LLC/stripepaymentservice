@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { CouponService } from '../services/coupon.service';
 import { z } from 'zod';
+import { AppError } from '../utils/AppError';
 
 const couponService = new CouponService();
 
@@ -59,10 +60,7 @@ export const createCoupon = async (req: Request, res: Response, next: NextFuncti
             stripeProductIds = await couponService.resolveStripeProductIds(productKeys);
 
             if (stripeProductIds.length === 0) {
-                return res.status(400).json({
-                    status: 'error',
-                    message: 'Could not resolve Stripe Product IDs for the selected products. Ensure the pricing config has been synced first.',
-                });
+                return next(new AppError('Could not resolve Stripe Product IDs for the selected products. Ensure the pricing config has been synced first.', 400));
             }
         }
 
@@ -73,16 +71,12 @@ export const createCoupon = async (req: Request, res: Response, next: NextFuncti
             stripeMode,
         });
 
-        return res.status(201).json({
+        res.status(201).json({
             status: 'success',
             data: record,
         });
-    } catch (err: any) {
-        console.error('[CouponController] createCoupon error:', err);
-        return res.status(err.statusCode || 400).json({
-            status: 'error',
-            message: err.message,
-        });
+    } catch (err) {
+        next(err);
     }
 };
 
@@ -95,16 +89,12 @@ export const listCoupons = async (req: Request, res: Response, next: NextFunctio
         const stripeMode = (req.query.stripeMode as 'test' | 'live') ?? 'test';
         const coupons = await couponService.listCoupons(stripeMode);
 
-        return res.status(200).json({
+        res.status(200).json({
             status: 'success',
             data: coupons,
         });
-    } catch (err: any) {
-        console.error('[CouponController] listCoupons error:', err);
-        return res.status(err.statusCode || 500).json({
-            status: 'error',
-            message: err.message,
-        });
+    } catch (err) {
+        next(err);
     }
 };
 
@@ -119,15 +109,11 @@ export const deactivateCoupon = async (req: Request, res: Response, next: NextFu
 
         await couponService.deactivateCoupon(id as string, stripeMode);
 
-        return res.status(200).json({
+        res.status(200).json({
             status: 'success',
             message: `Coupon ${id} has been deactivated and will no longer be redeemable.`,
         });
-    } catch (err: any) {
-        console.error('[CouponController] deactivateCoupon error:', err);
-        return res.status(err.statusCode || 500).json({
-            status: 'error',
-            message: err.message,
-        });
+    } catch (err) {
+        next(err);
     }
 };

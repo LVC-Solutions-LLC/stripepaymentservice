@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { getOneTimePricing, getSubscriptionPricing, getAllPricingMetadata, getPricingSchema } from '../controllers/pricing.controller';
-import { syncPricing, syncPricingSchema, syncFullPricing } from '../controllers/admin.pricing.controller';
+import { getOneTimePricing, getSubscriptionPricing, getAllPricingMetadata, getPriceDetails, getPricingSchema } from '../controllers/pricing.controller';
+import { syncPricing, syncPricingSchema, syncFullPricing, updateTrialDays, updateTrialDaysSchema } from '../controllers/admin.pricing.controller';
 import { createCoupon, listCoupons, deactivateCoupon, createCouponSchema } from '../controllers/coupon.controller';
 import { validate } from '../middlewares/validate';
 
@@ -9,10 +9,14 @@ const router = Router();
 router.get('/one-time', validate(getPricingSchema), getOneTimePricing);
 router.get('/subscription/plan', validate(getPricingSchema), getSubscriptionPricing);
 router.get('/all', getAllPricingMetadata);
+router.get('/price-details', getPriceDetails);
 
 // Admin Sync
 router.post('/sync', validate(syncPricingSchema), syncPricing);
 router.post('/sync-full', syncFullPricing);
+
+// Admin Trial Days configuration per subscription role+tier
+router.patch('/subscription/trial-days', validate(updateTrialDaysSchema), updateTrialDays);
 
 // Coupon Management
 router.post('/coupons', validate(createCouponSchema), createCoupon);

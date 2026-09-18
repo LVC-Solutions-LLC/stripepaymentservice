@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import { z } from 'zod';
-// env update
+import { logger } from '../utils/logger';
+
 dotenv.config();
 
 const envSchema = z.object({
@@ -23,11 +24,6 @@ const envSchema = z.object({
     STRIPE_LIVE_SECRET_KEY: z.string().optional(),
     STRIPE_LIVE_WEBHOOK_SECRET: z.string().optional(),
 
-    // Fallback/Default Keys
-    STRIPE_PUBLISHABLE_KEY: z.string().min(1),
-    STRIPE_SECRET_KEY: z.string().min(1),
-    STRIPE_WEBHOOK_SECRET: z.string().min(1),
-
     // URL for redirects
     FRONTEND_URL: z.string().url().default('http://localhost:3000'),
 
@@ -38,7 +34,7 @@ const envSchema = z.object({
 const parseEnv = () => {
     const parsed = envSchema.safeParse(process.env);
     if (!parsed.success) {
-        console.error('❌ Invalid environment variables:', JSON.stringify(parsed.error.format(), null, 2));
+        logger.error('❌ Invalid environment variables:', parsed.error.format());
         process.exit(1);
     }
     return parsed.data;
@@ -46,4 +42,4 @@ const parseEnv = () => {
 
 export const env = parseEnv();
 
-console.log(`🚀 [Payment Service] Configured for Project: ${env.FIREBASE_PROJECT_ID} on Port: ${env.PORT}`);
+logger.info(`🚀 [Payment Service] Configured for Project: ${env.FIREBASE_PROJECT_ID} on Port: ${env.PORT}`);

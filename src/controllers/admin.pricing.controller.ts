@@ -20,20 +20,24 @@ export const syncPricingSchema = z.object({
     }),
 });
 
+export const updateTrialDaysSchema = z.object({
+    body: z.object({
+        role: z.string().min(1),
+        tier: z.string().min(1),
+        // 0 = no trial, 1–730 = trial days
+        trialDays: z.number().int().min(0).max(730),
+    }),
+});
+
 export const syncPricing = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const result = await adminPricingService.syncStripeProduct(req.body, req.body.stripeMode);
         res.status(200).json({
             status: 'success',
-            data: result
+            data: result,
         });
-    } catch (err: any) {
-        console.error("syncPricing Error:", err);
-        // We'll also return a 400 with the error message so Next.js sees it in the catch block rather than just 'error'
-        res.status(400).json({
-            status: 'error',
-            message: err.message
-        });
+    } catch (err) {
+        next(err);
     }
 };
 
@@ -42,13 +46,22 @@ export const syncFullPricing = async (req: Request, res: Response, next: NextFun
         const result = await adminPricingService.syncFullPricingConfig(req.body, req.body.stripeMode);
         res.status(200).json({
             status: 'success',
-            data: result
+            data: result,
         });
-    } catch (err: any) {
-        console.error("syncFullPricing Error:", err);
-        res.status(400).json({
-            status: 'error',
-            message: err.message
+    } catch (err) {
+        next(err);
+    }
+};
+
+export const updateTrialDays = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { role, tier, trialDays } = req.body;
+        const result = await adminPricingService.updateTrialDays(role, tier, trialDays);
+        res.status(200).json({
+            status: 'success',
+            data: result,
         });
+    } catch (err) {
+        next(err);
     }
 };

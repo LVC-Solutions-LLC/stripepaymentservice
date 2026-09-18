@@ -58,3 +58,48 @@ export const applyCoupon = async (req: Request, res: Response, next: NextFunctio
         next(err);
     }
 };
+
+export const getInvoicesSchema = z.object({
+    params: z.object({
+        identifier: z.string().optional(),
+    }).optional(),
+    query: z.object({
+        identifier: z.string().optional(),
+        userId: z.string().optional(),
+        email: z.string().optional(),
+        stripeMode: z.enum(['test', 'live']).optional(),
+        limit: z.string().optional(),
+    }).optional(),
+});
+
+export const getUserInvoices = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const identifier = (
+            (req.params.identifier as string) ||
+            (req.query.identifier as string) ||
+            (req.query.userId as string) ||
+            (req.query.email as string)
+        );
+
+        if (!identifier) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'User login identifier (userId, email, or customerId) is required as path param or query param',
+            });
+        }
+
+        const stripeMode = req.query.stripeMode as 'test' | 'live' | undefined;
+        const limit = req.query.limit ? Number(req.query.limit) : 50;
+
+        const invoices = await subscriptionService.getUserInvoices(identifier, stripeMode, limit);
+
+        res.status(200).json({
+            status: 'success',
+            count: invoices.length,
+            data: invoices,
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+

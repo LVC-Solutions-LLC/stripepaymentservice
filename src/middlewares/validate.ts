@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { ZodSchema, ZodError } from 'zod';
-import { AppError } from '../utils/AppError';
+import { logger } from '../utils/logger';
 
 export const validate = (schema: ZodSchema) => (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -12,21 +12,19 @@ export const validate = (schema: ZodSchema) => (req: Request, res: Response, nex
         next();
     } catch (error) {
         if (error instanceof ZodError) {
-            // ZodError has .issues
-            const errorMessages = error.issues.map((issue: any) => ({
+            const errorMessages = error.issues.map((issue) => ({
+                field: issue.path.join('.'),
                 message: `${issue.path.join('.')} is ${issue.message}`,
             }));
 
-            // Log and return
-            console.error('Validation Errors:', errorMessages);
+            logger.warn('Validation Error:', errorMessages);
             res.status(400).json({
                 status: 'fail',
                 message: 'Validation Error',
-                errors: errorMessages
+                errors: errorMessages,
             });
             return;
-        } else {
-            next(new AppError('Internal Server Error', 500));
         }
+        next(error);
     }
 };
