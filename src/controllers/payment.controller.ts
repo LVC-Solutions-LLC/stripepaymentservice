@@ -9,7 +9,7 @@ export const createVerificationIntentSchema = z.object({
     body: z.object({
         userId: z.string().uuid().or(z.string().min(1)), // Accept UUID or string ID
         email: z.string().email(),
-        role: z.enum(['job_seeker', 'company', 'test', 'student_job_seeker', 'recruiter']),
+        role: z.enum(['job_seeker', 'company', 'test', 'student_job_seeker', 'recruiter', 'university', 'sales_champion', 'placement_admin', 'jobseeker', 'studentjobseeker']),
         country: z.string().length(2), // ISO 2-letter country code
         stripeMode: z.enum(['test', 'live']).optional(),
     }),
@@ -19,7 +19,7 @@ export const createVerificationCheckoutSchema = z.object({
     body: z.object({
         userId: z.string().uuid().or(z.string().min(1)),
         email: z.string().email(),
-        role: z.enum(['job_seeker', 'company', 'test', 'student_job_seeker', 'recruiter']),
+        role: z.enum(['job_seeker', 'company', 'test', 'student_job_seeker', 'recruiter', 'university', 'sales_champion', 'placement_admin', 'jobseeker', 'studentjobseeker']),
         country: z.string().length(2),
         stripeMode: z.enum(['test', 'live']).optional(),
         successUrl: z.string().url(),
