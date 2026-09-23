@@ -513,4 +513,48 @@ export class SubscriptionService {
             throw err;
         }
     }
+
+    async createCustomerPortalSession(userId: string, returnUrl?: string, stripeMode?: 'test' | 'live') {
+        const stripe = getStripe(stripeMode);
+
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (!userDoc.exists) {
+            throw new AppError('User not found', 404);
+        }
+
+        const userData = userDoc.data() || {};
+        let stripeCustomerId = userData.stripeCustomerId || userData.customerId;
+
+        // If not found on user doc, try finding from user's activeSubscription or by email
+        if (!stripeCustomerId) {
+            const subscriptionId = userData.activeSubscription?.subscriptionId;
+            if (subscriptionId) {
+                try {
+                    const sub = await stripe.subscriptions.retrieve(subscriptionId);
+                    stripeCustomerId = typeof sub.customer === 'string' ? sub.customer : sub.customer?.id;
+                } catch (subErr: any) {
+                    logger.warn(`[createCustomerPortalSession] Could not retrieve customer from sub ${subscriptionId}: ${subErr.message}`);
+                }
+            }
+        }
+
+        if (!stripeCustomerId && userData.email) {
+            const customers = await stripe.customers.list({ email: userData.email, limit: 1 });
+            if (customers.data.length > 0) {
+                stripeCustomerId = customers.data[0].id;
+            }
+        }
+
+        if (!stripeCustomerId) {
+            throw new AppError('No Stripe customer profile found for this user', 404);
+        }
+
+        const session = await stripe.billingPortal.sessions.create({
+            customer: stripeCustomerId,
+            return_url: returnUrl || 'https://lvcjobportal.com/dashboard',
+        });
+
+        return { url: session.url };
+    }
 }
+

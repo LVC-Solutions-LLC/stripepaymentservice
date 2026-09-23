@@ -98,6 +98,121 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
                 }, { merge: true });
                 break;
 
+            case 'invoice.payment_failed': {
+                const invoice = event.data.object as any;
+                const subscriptionId = typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id;
+                let userId = invoice.subscription_details?.metadata?.userId || invoice.metadata?.userId;
+                let role = invoice.subscription_details?.metadata?.role || invoice.metadata?.role || 'job_seeker';
+
+                if (!userId && subscriptionId) {
+                    const subDoc = await db.collection('subscriptions').doc(subscriptionId).get();
+                    if (subDoc.exists) {
+                        const subData = subDoc.data();
+                        userId = subData?.userId;
+                        role = subData?.role || role;
+                    }
+                }
+
+                logger.warn(`⚠️ [Webhook] Auto-deduct failed for invoice ${invoice.id}, user: ${userId}, subscription: ${subscriptionId}`);
+
+                if (userId) {
+                    const now = new Date();
+                    const gracePeriodEnd = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000); // 48-hour (2-day) grace period
+
+                    const failureData: any = {
+                        status: 'past_due',
+                        paymentStatus: 'failed',
+                        failedAt: now,
+                        gracePeriodEnd: gracePeriodEnd,
+                        amountDue: invoice.amount_due ? invoice.amount_due / 100 : 0,
+                        currency: invoice.currency?.toUpperCase() || 'USD',
+                        hostedInvoiceUrl: invoice.hosted_invoice_url || null,
+                        invoicePdf: invoice.invoice_pdf || null,
+                        lastPaymentError: invoice.last_payment_error?.message || 'Payment method declined by bank.',
+                        updatedAt: FieldValue.serverTimestamp(),
+                    };
+
+                    await db.collection('users').doc(userId).set({
+                        activeSubscription: failureData,
+                    }, { merge: true });
+
+                    if (subscriptionId) {
+                        await db.collection('subscriptions').doc(subscriptionId).set(failureData, { merge: true });
+                    }
+                    logger.info(`🚨 [Webhook] Set 2-day grace period for user ${userId} ending at ${gracePeriodEnd.toISOString()}`);
+                }
+                break;
+            }
+
+            case 'invoice.paid': {
+                const invoice = event.data.object as any;
+                const subscriptionId = typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id;
+                let userId = invoice.subscription_details?.metadata?.userId || invoice.metadata?.userId;
+
+                if (!userId && subscriptionId) {
+                    const subDoc = await db.collection('subscriptions').doc(subscriptionId).get();
+                    if (subDoc.exists) {
+                        userId = subDoc.data()?.userId;
+                    }
+                }
+
+                if (userId) {
+                    logger.info(`✅ [Webhook] Invoice ${invoice.id} paid. Restoring active subscription for user ${userId}`);
+
+                    await db.collection('users').doc(userId).set({
+                        activeSubscription: {
+                            status: 'active',
+                            paymentStatus: 'paid',
+                            failedAt: null,
+                            gracePeriodEnd: null,
+                            lastPaymentError: null,
+                            isAccountPaused: false,
+                            updatedAt: FieldValue.serverTimestamp(),
+                        }
+                    }, { merge: true });
+
+                    if (subscriptionId) {
+                        await db.collection('subscriptions').doc(subscriptionId).set({
+                            status: 'active',
+                            paymentStatus: 'paid',
+                            failedAt: null,
+                            gracePeriodEnd: null,
+                            lastPaymentError: null,
+                            updatedAt: FieldValue.serverTimestamp(),
+                        }, { merge: true });
+                    }
+
+                    // If user belongs to a company, restore and unhide any jobs that were hidden due to payment suspension
+                    const userDoc = await db.collection('users').doc(userId).get();
+                    const companyId = userDoc.data()?.registrationId || userDoc.data()?.companyId;
+
+                    if (companyId) {
+                        try {
+                            const hiddenJobsSnap = await db.collection('jobs')
+                                .where('companyId', '==', companyId)
+                                .where('hiddenByPaymentFailure', '==', true)
+                                .get();
+
+                            if (!hiddenJobsSnap.empty) {
+                                const batch = db.batch();
+                                hiddenJobsSnap.docs.forEach((doc) => {
+                                    batch.update(doc.ref, {
+                                        hiddenByPaymentFailure: false,
+                                        status: 'active',
+                                        updatedAt: FieldValue.serverTimestamp(),
+                                    });
+                                });
+                                await batch.commit();
+                                logger.info(`✅ [Webhook] Restored ${hiddenJobsSnap.size} company jobs for company ${companyId}`);
+                            }
+                        } catch (jobErr: any) {
+                            logger.error(`❌ [Webhook] Error restoring hidden jobs for company ${companyId}: ${jobErr.message}`);
+                        }
+                    }
+                }
+                break;
+            }
+
             case 'customer.subscription.created':
             case 'customer.subscription.updated':
             case 'customer.subscription.deleted':

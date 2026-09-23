@@ -103,3 +103,22 @@ export const getUserInvoices = async (req: Request, res: Response, next: NextFun
     }
 };
 
+export const customerPortalSchema = z.object({
+    body: z.object({
+        userId: z.string().min(1),
+        returnUrl: z.string().url().optional(),
+        stripeMode: z.enum(['test', 'live']).optional(),
+    }),
+});
+
+export const createCustomerPortal = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { userId, returnUrl, stripeMode } = req.body;
+        const result = await subscriptionService.createCustomerPortalSession(userId, returnUrl, stripeMode);
+        res.status(200).json({ status: 'success', data: result });
+    } catch (err) {
+        next(err);
+    }
+};
+
+
