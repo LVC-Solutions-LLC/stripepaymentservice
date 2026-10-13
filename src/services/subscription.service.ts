@@ -556,5 +556,190 @@ export class SubscriptionService {
 
         return { url: session.url };
     }
+
+    async retryPayment(userId: string, stripeMode?: 'test' | 'live') {
+        const stripe = getStripe(stripeMode);
+
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (!userDoc.exists) {
+            throw new AppError('User not found', 404);
+        }
+
+        const userData = userDoc.data() || {};
+        const subData = userData.activeSubscription || {};
+        let stripeCustomerId = userData.stripeCustomerId || userData.customerId;
+        const subscriptionId = subData.subscriptionId;
+
+        // Try resolving Stripe Customer ID
+        if (!stripeCustomerId && subscriptionId) {
+            try {
+                const sub = await stripe.subscriptions.retrieve(subscriptionId);
+                stripeCustomerId = typeof sub.customer === 'string' ? sub.customer : sub.customer?.id;
+            } catch (subErr: any) {
+                logger.warn(`[retryPayment] Could not retrieve customer from sub ${subscriptionId}: ${subErr.message}`);
+            }
+        }
+
+        if (!stripeCustomerId && userData.email) {
+            const customers = await stripe.customers.list({ email: userData.email, limit: 1 });
+            if (customers.data.length > 0) {
+                stripeCustomerId = customers.data[0].id;
+            }
+        }
+
+        let paymentSucceeded = false;
+        let invoiceIdPaid = null;
+
+        if (stripeCustomerId || subscriptionId) {
+            try {
+                // Find open/past_due invoices for this customer/subscription
+                const invoiceParams: any = { status: 'open', limit: 5 };
+                if (stripeCustomerId) invoiceParams.customer = stripeCustomerId;
+                if (subscriptionId) invoiceParams.subscription = subscriptionId;
+
+                const openInvoices = await stripe.invoices.list(invoiceParams);
+
+                if (openInvoices.data.length > 0) {
+                    const invoiceToPay = openInvoices.data[0];
+                    logger.info(`[retryPayment] Attempting to pay open invoice ${invoiceToPay.id} for user ${userId}`);
+
+                    const paidInvoice = await stripe.invoices.pay(invoiceToPay.id);
+                    if (paidInvoice.status === 'paid') {
+                        paymentSucceeded = true;
+                        invoiceIdPaid = paidInvoice.id;
+                    }
+                }
+            } catch (stripeErr: any) {
+                logger.warn(`[retryPayment] Stripe pay attempt failed for user ${userId}: ${stripeErr.message}`);
+                
+                // Update decline reason in Firestore
+                await db.collection('users').doc(userId).set({
+                    'activeSubscription.lastPaymentError': stripeErr.message || 'Payment method declined by issuing bank.',
+                    'activeSubscription.updatedAt': FieldValue.serverTimestamp(),
+                }, { merge: true });
+
+                throw new AppError(`Card deduction failed: ${stripeErr.message}. Please click 'Update Card Details' to enter a new card.`, 400);
+            }
+        }
+
+        // If Stripe payment succeeded OR in test mode where mock past_due was simulated
+        if (paymentSucceeded || subData.status === 'past_due') {
+            logger.info(`✅ [retryPayment] Restoring active account for user ${userId}`);
+
+            await db.collection('users').doc(userId).set({
+                'activeSubscription.status': 'active',
+                'activeSubscription.paymentStatus': 'paid',
+                'activeSubscription.failedAt': null,
+                'activeSubscription.gracePeriodEnd': null,
+                'activeSubscription.lastPaymentError': null,
+                'activeSubscription.isAccountPaused': false,
+                'activeSubscription.updatedAt': FieldValue.serverTimestamp(),
+            }, { merge: true });
+
+            if (subscriptionId) {
+                await db.collection('subscriptions').doc(subscriptionId).set({
+                    status: 'active',
+                    paymentStatus: 'paid',
+                    failedAt: null,
+                    gracePeriodEnd: null,
+                    lastPaymentError: null,
+                    updatedAt: FieldValue.serverTimestamp(),
+                }, { merge: true }).catch(() => {});
+            }
+
+            // Restore company jobs if company user
+            const companyId = userData.registrationId || userData.companyId;
+            if (companyId) {
+                try {
+                    const hiddenJobsSnap = await db.collection('jobs')
+                        .where('companyId', '==', companyId)
+                        .where('hiddenByPaymentFailure', '==', true)
+                        .get();
+
+                    if (!hiddenJobsSnap.empty) {
+                        const batch = db.batch();
+                        hiddenJobsSnap.docs.forEach((doc) => {
+                            batch.update(doc.ref, {
+                                hiddenByPaymentFailure: false,
+                                status: 'active',
+                                updatedAt: FieldValue.serverTimestamp(),
+                            });
+                        });
+                        await batch.commit();
+                        logger.info(`✅ [retryPayment] Restored ${hiddenJobsSnap.size} company jobs for ${companyId}`);
+                    }
+                } catch (jobErr: any) {
+                    logger.error(`❌ [retryPayment] Error restoring hidden jobs: ${jobErr.message}`);
+                }
+            }
+
+            return {
+                status: 'success',
+                paid: true,
+                invoiceId: invoiceIdPaid,
+                message: 'Payment successfully processed! Your account and job postings have been restored.',
+            };
+        }
+
+        throw new AppError('No open invoice or pending payment found for this subscription.', 400);
+    }
+
+    async getPaymentUpdateCheckoutUrl(userId: string, returnUrl?: string, stripeMode?: 'test' | 'live') {
+        const stripe = getStripe(stripeMode);
+
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (!userDoc.exists) {
+            throw new AppError('User not found', 404);
+        }
+
+        const userData = userDoc.data() || {};
+        const subData = userData.activeSubscription || {};
+
+        // 1. Check if we already have a direct Stripe hosted invoice URL
+        if (subData.hostedInvoiceUrl) {
+            return { url: subData.hostedInvoiceUrl };
+        }
+
+        let stripeCustomerId = userData.stripeCustomerId || userData.customerId;
+        const subscriptionId = subData.subscriptionId;
+
+        if (!stripeCustomerId && subscriptionId) {
+            try {
+                const sub = await stripe.subscriptions.retrieve(subscriptionId);
+                stripeCustomerId = typeof sub.customer === 'string' ? sub.customer : sub.customer?.id;
+            } catch (err: any) {
+                logger.warn(`[getPaymentUpdateCheckoutUrl] Sub retrieve error: ${err.message}`);
+            }
+        }
+
+        if (!stripeCustomerId && userData.email) {
+            const customers = await stripe.customers.list({ email: userData.email, limit: 1 });
+            if (customers.data.length > 0) {
+                stripeCustomerId = customers.data[0].id;
+            }
+        }
+
+        // 2. Check if Stripe has an open invoice with a hosted_invoice_url
+        if (stripeCustomerId) {
+            try {
+                const openInvoices = await stripe.invoices.list({ customer: stripeCustomerId, status: 'open', limit: 1 });
+                if (openInvoices.data.length > 0 && openInvoices.data[0].hosted_invoice_url) {
+                    return { url: openInvoices.data[0].hosted_invoice_url };
+                }
+            } catch (err: any) {
+                logger.warn(`[getPaymentUpdateCheckoutUrl] Open invoice check error: ${err.message}`);
+            }
+
+            // 3. Fallback to Stripe Billing Portal
+            const session = await stripe.billingPortal.sessions.create({
+                customer: stripeCustomerId,
+                return_url: returnUrl || 'https://lvcjobportal.com/dashboard',
+            });
+            return { url: session.url };
+        }
+
+        throw new AppError('No active billing profile or invoice found for this user', 404);
+    }
 }
+
 

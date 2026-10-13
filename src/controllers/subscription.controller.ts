@@ -121,4 +121,40 @@ export const createCustomerPortal = async (req: Request, res: Response, next: Ne
     }
 };
 
+export const retryPaymentSchema = z.object({
+    body: z.object({
+        userId: z.string().min(1),
+        stripeMode: z.enum(['test', 'live']).optional(),
+    }),
+});
+
+export const retrySubscriptionPayment = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { userId, stripeMode } = req.body;
+        const result = await subscriptionService.retryPayment(userId, stripeMode);
+        res.status(200).json(result);
+    } catch (err) {
+        next(err);
+    }
+};
+
+export const updatePaymentCheckoutSchema = z.object({
+    body: z.object({
+        userId: z.string().min(1),
+        returnUrl: z.string().url().optional(),
+        stripeMode: z.enum(['test', 'live']).optional(),
+    }),
+});
+
+export const getUpdatePaymentCheckout = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { userId, returnUrl, stripeMode } = req.body;
+        const result = await subscriptionService.getPaymentUpdateCheckoutUrl(userId, returnUrl, stripeMode);
+        res.status(200).json({ status: 'success', data: result });
+    } catch (err) {
+        next(err);
+    }
+};
+
+
 
